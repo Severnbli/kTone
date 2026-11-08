@@ -107,6 +107,8 @@ export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
         degree: degree > 0 ? degree : null,
         inKey: out[10] === 1,
         staffStep: out[11],
+        centerMidi: out[12],
+        centerCents: out[13],
       };
     },
     keys: () => keys.map((k) => ({ ...k })),

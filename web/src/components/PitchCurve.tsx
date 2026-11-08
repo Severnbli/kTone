@@ -133,7 +133,8 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         ctx.fillRect(LABEL_W, top, plotW, bottom - top);
       }
 
-      // Pitch line, colored by accuracy relative to the stable note.
+      // Raw pitch line (vibrato stays visible), colored by the accuracy of the
+      // vibrato center relative to the stable note.
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
       let prevX = NaN;
@@ -151,7 +152,7 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         const xx = xOf(time);
         const yy = yOf(midi);
         if (Number.isFinite(prevX) && time - prevT <= MAX_GAP_MS) {
-          const zone = classifyCents((midi - h.stable[idx]) * 100, zones);
+          const zone = classifyCents(h.centerCents[idx], zones);
           ctx.strokeStyle = palette.zones[zone];
           ctx.beginPath();
           ctx.moveTo(prevX, prevY);

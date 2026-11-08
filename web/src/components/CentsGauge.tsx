@@ -11,6 +11,8 @@ interface Props {
 /**
  * ±50 cent gauge. Updated imperatively on every analyzer frame (no React
  * re-render): the root's `data-zone`, the needle position and the readout.
+ * All three follow the vibrato center (`centerCents`), so vibrato around the
+ * target reads as a hit and the needle stays calm.
  */
 export function CentsGauge({ store, zones }: Props) {
   const { t } = useI18n();
@@ -31,12 +33,13 @@ export function CentsGauge({ store, zones }: Props) {
         readout.textContent = '–';
         return;
       }
-      const zone = classifyCents(frame.cents, zones);
-      const rounded = Math.round(frame.cents);
+      const cents = frame.centerCents;
+      const zone = classifyCents(cents, zones);
+      const rounded = Math.round(cents);
       root.dataset.zone = zone;
       root.setAttribute('aria-valuenow', String(rounded));
       root.setAttribute('aria-valuetext', `${rounded} ${t.cents}`);
-      needle.style.left = `${needlePercent(frame.cents)}%`;
+      needle.style.left = `${needlePercent(cents)}%`;
       readout.textContent = `${rounded > 0 ? '+' : ''}${rounded}`;
     };
     apply();

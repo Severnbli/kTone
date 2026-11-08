@@ -6,3 +6,6 @@ description = "Platform-agnostic audio core for kTone: pitch detection and music
 license = "GPL-3.0-or-later"
 
 [dependencies]
+
+[dev-dependencies]
+hound = "3.5"

@@ -1,6 +1,9 @@
 // Microphone capture: getUserMedia (all browser voice processing off) ->
 // MediaStreamSource -> AudioWorklet (`public/pitch-worklet.js`) -> blocks of
-// samples posted to the main thread.
+// samples posted to the main thread. The session reports interruptions
+// (track ended or muted, context suspended or interrupted) via `onStateChange`.
+
+import { isContextPaused, resumeContext } from './lifecycle';
 
 export type MicErrorCode = 'denied' | 'notFound' | 'unsupported' | 'error';
 
@@ -13,9 +16,73 @@ export class MicError extends Error {
   }
 }
 
+/**
+ * - `running`: samples are flowing.
+ * - `suspended`: the system paused audio (phone call, Siri, background, muted
+ *   track); `resume()` may bring it back.
+ * - `ended`: the track is gone (device unplugged, permission revoked, mic taken
+ *   by another app). The session is dead; start a new one.
+ */
+export type MicState = 'running' | 'suspended' | 'ended';
+
 export interface MicSession {
   readonly sampleRate: number;
+  readonly state: MicState;
+  /** Tries to resume a suspended session. Resolves to true when running again. */
+  resume(): Promise<boolean>;
   stop(): Promise<void>;
+}
+
+export interface MicOptions {
+  /** Samples per block posted by the worklet. */
+  blockSize?: number;
+  /** Called when the session state changes (not called for `stop()`). */
+  onStateChange?: (state: MicState) => void;
+}
+
+export type StartMic = (
+  onBlock: (block: Float32Array) => void,
+  options?: MicOptions,
+) => Promise<MicSession>;
+
+/** The subset of MediaStreamTrack / AudioContext the state watcher needs. */
+export interface TrackLike extends EventTarget {
+  readonly readyState: string;
+  readonly muted: boolean;
+}
+export interface WatchedContextLike extends EventTarget {
+  readonly state: string;
+}
+
+export function micState(track: TrackLike, ctx: WatchedContextLike): MicState {
+  if (track.readyState === 'ended') return 'ended';
+  if (track.muted || isContextPaused(ctx.state) || ctx.state === 'closed') return 'suspended';
+  return 'running';
+}
+
+/**
+ * Listens to track `ended`/`mute`/`unmute` and context `statechange` and calls
+ * `onChange` whenever the derived MicState changes. Returns a detach function.
+ */
+export function watchMicState(
+  track: TrackLike,
+  ctx: WatchedContextLike,
+  onChange: (state: MicState) => void,
+): () => void {
+  let last = micState(track, ctx);
+  const update = () => {
+    const next = micState(track, ctx);
+    if (next === last || last === 'ended') return;
+    last = next;
+    onChange(next);
+  };
+  const trackEvents = ['ended', 'mute', 'unmute'];
+  trackEvents.forEach((e) => track.addEventListener(e, update));
+  ctx.addEventListener('statechange', update);
+  return () => {
+    trackEvents.forEach((e) => track.removeEventListener(e, update));
+    ctx.removeEventListener('statechange', update);
+  };
 }
 
 export const WORKLET_URL = `${import.meta.env.BASE_URL}pitch-worklet.js`;
@@ -37,10 +104,8 @@ export function classifyMicError(err: unknown): MicErrorCode {
  * Must be called from a user gesture (creates/resumes the AudioContext).
  * `onBlock` receives a block that is only valid during the call.
  */
-export async function startMic(
-  onBlock: (block: Float32Array) => void,
-  blockSize = 512,
-): Promise<MicSession> {
+export const startMic: StartMic = async (onBlock, options = {}) => {
+  const { blockSize = 512, onStateChange } = options;
   if (
     typeof navigator === 'undefined' ||
     !navigator.mediaDevices?.getUserMedia ||
@@ -88,9 +153,20 @@ export async function startMic(
     mute.gain.value = 0;
     source.connect(node).connect(mute).connect(ctx.destination);
 
+    const [track] = stream.getAudioTracks();
+    const detach = watchMicState(track, ctx, (state) => onStateChange?.(state));
+
     return {
       sampleRate: ctx.sampleRate,
+      get state() {
+        return micState(track, ctx);
+      },
+      async resume() {
+        if (track.readyState === 'ended') return false;
+        return (await resumeContext(ctx)) && micState(track, ctx) === 'running';
+      },
       async stop() {
+        detach();
         node.port.onmessage = null;
         source.disconnect();
         node.disconnect();
@@ -104,4 +180,4 @@ export async function startMic(
     await ctx.close().catch(() => undefined);
     throw new MicError('error', err);
   }
-}
+};

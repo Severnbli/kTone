@@ -1,34 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockAnalyzer } from '../engine/mock';
 import type { AnalyzerSettings } from '../engine/types';
+import { fakeMic, fakeVisibility, flush } from '../test/fakes';
 import { MicError, classifyMicError } from './mic';
-import { PitchEngine } from './pitchEngine';
+import { PitchEngine, type EngineState } from './pitchEngine';
 import { PitchStore } from './pitchStore';
 
-const SR = 48000;
 const settings: AnalyzerSettings = {
   key: { tonic: 'C', accidental: 0, mode: 'major' },
   clef: 'treble',
   a4Hz: 440,
 };
-
-function fakeMic() {
-  let onBlock: ((b: Float32Array) => void) | null = null;
-  const stop = vi.fn(async () => undefined);
-  const startMic = vi.fn(async (cb: (b: Float32Array) => void) => {
-    onBlock = cb;
-    return { sampleRate: SR, stop };
-  });
-  let phase = 0;
-  const feedSine = (hz: number, samples: number) => {
-    for (let done = 0; done < samples; done += 128) {
-      const block = new Float32Array(128);
-      for (let i = 0; i < 128; i++) block[i] = 0.5 * Math.sin((2 * Math.PI * hz * phase++) / SR);
-      onBlock?.(block);
-    }
-  };
-  return { startMic, stop, feedSine };
-}
 
 describe('PitchEngine', () => {
   it('runs the analyzer every hop and fills the store', async () => {
@@ -81,6 +63,137 @@ describe('PitchEngine', () => {
     await expect(engine.start(settings)).rejects.toThrow('wasm');
     expect(mic.stop).toHaveBeenCalled();
     expect(engine.running).toBe(false);
+  });
+});
+
+describe('PitchEngine lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setup(hidden = false) {
+    const mic = fakeMic();
+    const visibility = fakeVisibility(hidden);
+    const store = new PitchStore();
+    const engine = new PitchEngine(store, {
+      factory: createMockAnalyzer,
+      startMic: mic.startMic,
+      now: () => 0,
+      visibility,
+      backgroundStopMs: 1000,
+    });
+    const states: EngineState[] = [];
+    engine.subscribe((s) => states.push(s));
+    return { mic, visibility, store, engine, states };
+  }
+
+  it('reports running after start and idle/user after stop', async () => {
+    const { engine, states, visibility } = setup();
+    await engine.start(settings);
+    expect(engine.state).toEqual({ status: 'running', stopReason: null });
+    expect(visibility.listeners).toBe(1);
+    await engine.stop();
+    expect(states).toEqual([
+      { status: 'running', stopReason: null },
+      { status: 'idle', stopReason: 'user' },
+    ]);
+    expect(visibility.listeners).toBe(0);
+  });
+
+  it('stops with reason `ended` when the mic track ends', async () => {
+    const { engine, mic, store } = setup();
+    await engine.start(settings);
+    mic.feedSine(440, 2048);
+    expect(store.getNote()).not.toBeNull();
+    mic.setState('ended');
+    await flush();
+    expect(engine.state).toEqual({ status: 'idle', stopReason: 'ended' });
+    expect(engine.running).toBe(false);
+    expect(mic.stop).toHaveBeenCalled();
+    expect(store.getNote()).toBeNull();
+  });
+
+  it('auto-resumes a suspended mic while visible', async () => {
+    const { engine, mic, states } = setup();
+    await engine.start(settings);
+    mic.setState('suspended');
+    await flush();
+    expect(mic.resume).toHaveBeenCalledTimes(1);
+    expect(engine.state.status).toBe('running');
+    expect(states.map((s) => s.status)).toEqual(['running', 'suspended', 'running']);
+  });
+
+  it('stays suspended when auto-resume fails, and resume() restarts the mic', async () => {
+    const { engine, mic } = setup();
+    await engine.start(settings);
+    mic.setResumeWorks(false);
+    mic.setState('suspended');
+    await flush();
+    expect(engine.state.status).toBe('suspended');
+    expect(engine.running).toBe(true);
+
+    await engine.resume();
+    expect(mic.stop).toHaveBeenCalledTimes(1);
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    expect(engine.state).toEqual({ status: 'running', stopReason: null });
+  });
+
+  it('resume() keeps the session when resuming it works', async () => {
+    const { engine, mic } = setup();
+    await engine.start(settings);
+    mic.setResumeWorks(false);
+    mic.setState('suspended');
+    await flush();
+    mic.setResumeWorks(true);
+    await engine.resume();
+    expect(mic.startMic).toHaveBeenCalledTimes(1);
+    expect(engine.state.status).toBe('running');
+  });
+
+  it('waits until visible to resume a mic suspended in the background', async () => {
+    const { engine, mic, visibility } = setup();
+    await engine.start(settings);
+    visibility.set(true);
+    mic.setState('suspended');
+    await flush();
+    expect(mic.resume).not.toHaveBeenCalled();
+    expect(engine.state.status).toBe('suspended');
+    visibility.set(false);
+    await flush();
+    expect(mic.resume).toHaveBeenCalledTimes(1);
+    expect(engine.state.status).toBe('running');
+  });
+
+  it('stops after staying hidden for the background timeout', async () => {
+    vi.useFakeTimers();
+    const { engine, mic, visibility } = setup();
+    await engine.start(settings);
+    visibility.set(true);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(engine.running).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(engine.state).toEqual({ status: 'idle', stopReason: 'background' });
+    expect(mic.stop).toHaveBeenCalled();
+  });
+
+  it('keeps running when the page comes back before the timeout', async () => {
+    vi.useFakeTimers();
+    const { engine, visibility } = setup();
+    await engine.start(settings);
+    visibility.set(true);
+    await vi.advanceTimersByTimeAsync(900);
+    visibility.set(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(engine.state.status).toBe('running');
+  });
+
+  it('ignores state events from a stopped session', async () => {
+    const { engine, mic } = setup();
+    await engine.start(settings);
+    await engine.stop();
+    mic.setState('ended');
+    await flush();
+    expect(engine.state).toEqual({ status: 'idle', stopReason: 'user' });
   });
 });
 

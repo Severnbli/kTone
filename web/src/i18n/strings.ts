@@ -55,6 +55,10 @@ export const ru = {
   flat: 'ниже',
   sharp: 'выше',
   inTune: 'точно',
+  micEnded: 'Микрофон отключился. Проверьте подключение и нажмите «Начать».',
+  micBackground: 'Запись остановлена, пока приложение было в фоне.',
+  micPaused: 'Пауза: система прервала звук (звонок или другое приложение).',
+  resume: 'Продолжить',
 } as const;
 
 export type Strings = { [K in keyof typeof ru]: string };
@@ -111,6 +115,10 @@ export const en: Strings = {
   flat: 'flat',
   sharp: 'sharp',
   inTune: 'in tune',
+  micEnded: 'The microphone was disconnected. Check it and press Start.',
+  micBackground: 'Listening stopped while the app was in the background.',
+  micPaused: 'Paused: the system interrupted audio (a call or another app).',
+  resume: 'Resume',
 };
 
 export const STRINGS: Record<Lang, Strings> = { ru, en };

@@ -73,6 +73,19 @@ const OCTAVE_UP_CLARITY: f64 = 0.9;
 const OCTAVE_UP_WINDOW_CENTS: f64 = 60.0;
 /// Partials above this fraction of the sample rate are not fitted.
 const MAX_PARTIAL_FRACTION: f64 = 0.45;
+/// Polynomial terms of each partial's amplitude in the drone fit: 2 lets the
+/// amplitude change linearly over the frame, as during the drone's attack and
+/// release ramps and volume changes (a constant amplitude would leave the
+/// change in the residual, periodic at the drone pitch, i.e. "voice").
+const ENVELOPE_TERMS: usize = 2;
+/// Samples at or below this magnitude are digital silence (exact zeros, far
+/// below the LSB of a 16-bit input).
+const DIGITAL_SILENCE: f32 = 1e-6;
+/// A frame that starts or ends with at least this many silent samples is not
+/// analyzed: the stream had not started yet (browsers deliver zeros while the
+/// device warms up) or dropped out, and the gated frame both biases the pitch
+/// estimate (tens of cents) and defeats the drone fit.
+const MIN_SILENT_RUN: usize = 16;
 
 /// Raw single-frame estimate from the detector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -201,9 +214,10 @@ impl Mpm {
 
     /// Fraction of the last detected frame's energy that is still periodic
     /// with `lag` samples after removing sinusoids at `partials_hz` by least
-    /// squares (amplitude and phase of each are fitted, the frequencies are
-    /// given). Near 0 for a frame made of those sinusoids plus noise, large
-    /// for a voice whose other harmonics survive the fit.
+    /// squares (the frequencies are given; amplitude and phase of each are
+    /// fitted and may change linearly over the frame, see `ENVELOPE_TERMS`).
+    /// Near 0 for a frame made of those sinusoids plus noise, large for a
+    /// voice whose other harmonics survive the fit.
     ///
     /// Works on the frame of the last `detect` call and returns `None` if it
     /// did not return `Some`. Partials outside `(0, 0.45 * sample_rate)` and
@@ -212,10 +226,11 @@ impl Mpm {
     /// degenerate. Does not allocate.
     pub fn periodic_residual(&mut self, partials_hz: &[f64], lag: f64) -> Option<Residual> {
         const MAX: usize = DRONE_PARTIALS.len();
+        const E: usize = ENVELOPE_TERMS;
         // A constant column too: the DC removal in `detect` subtracts the mean
         // of the frame, and a partial over a non-integer number of periods has
         // a non-zero mean that would otherwise look periodic at every lag.
-        const DIM: usize = 2 * MAX + 1;
+        const DIM: usize = 2 * E * MAX + 1;
         self.has_residual = false;
         if !self.has_frame {
             return None;
@@ -235,19 +250,21 @@ impl Mpm {
         if count == 0 {
             return None;
         }
-        let dim = 2 * count + 1;
+        let dim = 2 * E * count + 1;
+        // Envelope variable: -0.5..0.5 over the frame, so the terms stay well
+        // conditioned.
+        let n = self.frame_size;
+        let mid = (n - 1) as f64 / 2.0;
+        let width = n as f64;
 
         // Normal equations [G | X^T x] of the fit, built with the basis
-        // cos/sin(w t) advanced by rotation (no trig per sample).
+        // cos/sin(w t) * u^e advanced by rotation (no trig per sample). The
+        // last column is the constant.
         let mut g = [[0.0f64; DIM + 1]; DIM];
         let mut basis = [1.0f64; DIM];
         let mut osc = [(1.0f64, 0.0f64); MAX];
-        for &x in &self.x {
-            for (j, o) in osc.iter_mut().enumerate().take(count) {
-                basis[2 * j] = o.0;
-                basis[2 * j + 1] = o.1;
-                *o = rotate(*o, step[j]);
-            }
+        for (t, &x) in self.x.iter().enumerate() {
+            fill_basis(&mut basis, &mut osc, &step, count, (t as f64 - mid) / width);
             for r in 0..dim {
                 let br = basis[r];
                 for (gc, &bc) in g[r][r..dim].iter_mut().zip(&basis[r..dim]) {
@@ -265,12 +282,13 @@ impl Mpm {
 
         // Residual into `re` (free scratch after `detect`).
         let mut osc = [(1.0f64, 0.0f64); MAX];
-        for (dst, &x) in self.re.iter_mut().zip(&self.x) {
-            let mut fit = coef[dim - 1];
-            for (j, o) in osc.iter_mut().enumerate().take(count) {
-                fit += coef[2 * j] * o.0 + coef[2 * j + 1] * o.1;
-                *o = rotate(*o, step[j]);
-            }
+        for (t, (dst, &x)) in self.re.iter_mut().zip(&self.x).enumerate() {
+            fill_basis(&mut basis, &mut osc, &step, count, (t as f64 - mid) / width);
+            let fit: f64 = coef[..dim]
+                .iter()
+                .zip(&basis[..dim])
+                .map(|(c, v)| c * v)
+                .sum();
             *dst = x - fit;
         }
         self.has_residual = true;
@@ -426,6 +444,40 @@ fn for_each_key_max(
 
 fn rotate((c, s): (f64, f64), (rc, rs): (f64, f64)) -> (f64, f64) {
     (c * rc - s * rs, s * rc + c * rs)
+}
+
+/// Writes the drone-fit basis at one sample into `basis`: for every partial
+/// `j` and envelope power `e`, `cos * u^e` and `sin * u^e` at
+/// `2 * (j * ENVELOPE_TERMS + e)`; the constant stays in the last used slot.
+/// Then advances the oscillators by one sample.
+fn fill_basis(
+    basis: &mut [f64],
+    osc: &mut [(f64, f64)],
+    step: &[(f64, f64)],
+    count: usize,
+    u: f64,
+) {
+    for j in 0..count {
+        let (c, s) = osc[j];
+        let mut p = 1.0;
+        for e in 0..ENVELOPE_TERMS {
+            let k = 2 * (j * ENVELOPE_TERMS + e);
+            basis[k] = c * p;
+            basis[k + 1] = s * p;
+            p *= u;
+        }
+        osc[j] = rotate(osc[j], step[j]);
+    }
+    basis[2 * ENVELOPE_TERMS * count] = 1.0;
+}
+
+/// `true` when `frame` starts or ends with a run of at least
+/// `MIN_SILENT_RUN` digitally silent samples.
+fn has_silent_edge(frame: &[f32]) -> bool {
+    let silent = |run: &[f32]| run.iter().all(|v| v.abs() <= DIGITAL_SILENCE);
+    let n = frame.len();
+    n >= MIN_SILENT_RUN
+        && (silent(&frame[..MIN_SILENT_RUN]) || silent(&frame[n - MIN_SILENT_RUN..]))
 }
 
 /// Solves the `dim x dim` system in `a` (augmented with the right-hand side in
@@ -653,7 +705,7 @@ impl PitchTracker {
         };
         // Gates are written as "passes" checks so a NaN threshold rejects the frame.
         let loud_enough = rms >= self.config.rms_threshold as f64;
-        if !loud_enough {
+        if !loud_enough || has_silent_edge(frame) {
             return self.invalid();
         }
         let Some(est) = self.mpm.detect(frame) else {

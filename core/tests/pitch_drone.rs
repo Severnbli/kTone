@@ -476,3 +476,56 @@ fn reset_clears_the_leak_flag() {
     t.reset();
     assert!(!t.drone_leak());
 }
+
+/// Frames whose start or end the drone does not fill must not show a note
+/// either: after a single leaking frame the UI keeps that note on screen.
+#[test]
+fn drone_after_digital_silence_is_never_a_note() {
+    // The microphone stream starts with blocks of exact zeros (browsers do
+    // this while the device warms up) and then hears the drone already
+    // playing. Try several offsets of the onset within a hop.
+    for &m in &DRONE_MIDIS {
+        let f = midi_to_hz(m);
+        let d = leaked_drone(m, 0.0, 11);
+        // Skip the room's own onset (its reflections build up over 1709 samples).
+        let steady = &d[(0.1 * SR) as usize..];
+        for shift in (0..HOP).step_by(64) {
+            let mut signal = vec![0.0f32; FRAME + shift];
+            signal.extend_from_slice(steady);
+            let out = track(&mut tracker(Some(f), true), &signal, 0);
+            let accepted: Vec<usize> = (0..out.len()).filter(|&i| out[i].0.is_some()).collect();
+            assert!(
+                accepted.is_empty(),
+                "drone {m}, onset +{shift}: frames {accepted:?} shown as a note"
+            );
+        }
+    }
+}
+
+#[test]
+fn drone_attack_and_release_are_never_a_note() {
+    // The mic is already running (room noise) when the drone fades in over
+    // `ATTACK_S` (0.4 s, linear) and later fades out over `RELEASE_S` (0.3 s).
+    for &m in &DRONE_MIDIS {
+        let f = midi_to_hz(m);
+        let raw = drone(f, 2.0);
+        let (on, attack, off, release) = (0.3 * SR, 0.4 * SR, 1.3 * SR, 0.3 * SR);
+        let enveloped: Vec<f64> = raw
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let t = i as f64;
+                let up = ((t - on) / attack).clamp(0.0, 1.0);
+                let down = 1.0 - ((t - off) / release).clamp(0.0, 1.0);
+                v * up.min(down)
+            })
+            .collect();
+        let signal = mix(&[(&room(&enveloped, 0.03, 0.0), 1.0)], 0.0005, 12);
+        let out = track(&mut tracker(Some(f), true), &signal, 0);
+        let accepted: Vec<usize> = (0..out.len()).filter(|&i| out[i].0.is_some()).collect();
+        assert!(
+            accepted.is_empty(),
+            "drone {m}: frames {accepted:?} shown as a note"
+        );
+    }
+}

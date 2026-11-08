@@ -725,3 +725,30 @@ fn tracker_survives_odd_configs() {
         assert!(tracker.process(&signal[..frame], 440.0).is_none());
     }
 }
+
+#[test]
+fn frames_with_digitally_silent_edges_are_not_analyzed() {
+    // A stream that starts (or drops out) mid-frame: exact zeros, then a tone.
+    // The gated frames bias the estimate, so they are skipped; the tone is
+    // tracked as soon as a frame is filled with it.
+    let sr = 48000.0;
+    let tone = sine(sr, FRAME * 6, 0.3, 261.63);
+    for lead in [16, 100, 600, 1500] {
+        let mut signal = vec![0.0f32; lead];
+        signal.extend_from_slice(&tone);
+        let out = track(&mut new_tracker(sr), &signal, 440.0);
+        let first_full = lead.div_ceil(HOP);
+        assert!(out[..first_full].iter().all(Option::is_none), "lead {lead}");
+        assert!(out[first_full..].iter().all(Option::is_some), "lead {lead}");
+
+        let mut dropout = tone.clone();
+        let len = dropout.len();
+        dropout[len - lead..].fill(0.0);
+        let out = track(&mut new_tracker(sr), &dropout, 440.0);
+        assert!(out.last().unwrap().is_none(), "dropout {lead}");
+    }
+    // Fewer zeros in a row (e.g. a sine starting at a zero crossing) are fine.
+    let mut signal = vec![0.0f32; 15];
+    signal.extend_from_slice(&tone);
+    assert!(new_tracker(sr).process(&signal[..FRAME], 440.0).is_some());
+}

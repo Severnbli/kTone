@@ -5,7 +5,14 @@ import { BACKGROUND_STOP_MS } from './audio/lifecycle';
 import { MicError } from './audio/mic';
 import { createMockAnalyzer } from './engine/mock';
 import { DEFAULT_SETTINGS, STORAGE_KEY } from './settings';
-import { fakeMic, fakeVisibility, fakeWakeLock, flush } from './test/fakes';
+import {
+  audioInput,
+  fakeMediaDevices,
+  fakeMic,
+  fakeVisibility,
+  fakeWakeLock,
+  flush,
+} from './test/fakes';
 
 describe('App', () => {
   it('starts the mic, shows the sung note, and respells on key change', async () => {
@@ -31,6 +38,43 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Стоп' }));
     await screen.findByRole('button', { name: 'Начать' });
     expect(screen.getByTestId('note-name')).toHaveTextContent('–');
+  });
+
+  it('restarts listening on the microphone chosen in settings and saves it', async () => {
+    const mic = fakeMic();
+    const md = fakeMediaDevices([audioInput('a', 'Built-in'), audioInput('usb', 'USB Mic')]);
+    render(<App factory={createMockAnalyzer} startMic={mic.startMic} mediaDevices={md} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+    await screen.findByRole('button', { name: 'Стоп' });
+    expect(mic.startMic.mock.calls[0][1]?.deviceId).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
+    await screen.findByRole('option', { name: 'USB Mic' });
+    fireEvent.change(screen.getByLabelText('Микрофон'), { target: { value: 'usb' } });
+    await waitFor(() => expect(mic.startMic).toHaveBeenCalledTimes(2));
+    expect(mic.startMic.mock.calls[1][1]?.deviceId).toBe('usb');
+    expect(mic.stop).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(screen.getByRole('button', { name: 'Стоп' })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).micDeviceId).toBe('usb');
+
+    act(() => mic.feed(440, 2048));
+    expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
+  });
+
+  it('opens the saved microphone on start', async () => {
+    const mic = fakeMic();
+    render(
+      <App
+        factory={createMockAnalyzer}
+        startMic={mic.startMic}
+        mediaDevices={null}
+        initialSettings={{ ...DEFAULT_SETTINGS, micDeviceId: 'usb' }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+    await screen.findByRole('button', { name: 'Стоп' });
+    expect(mic.startMic.mock.calls[0][1]?.deviceId).toBe('usb');
   });
 
   it('reports a denied microphone', async () => {

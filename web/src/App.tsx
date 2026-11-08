@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createAnalyzer } from './engine';
 import type { AnalyzerFactory } from './engine/types';
+import type { MediaDevicesLike } from './audio/devices';
 import { LevelStore } from './audio/level';
 import { documentVisibility, type PageVisibility } from './audio/lifecycle';
 import { MicError, startMic as realStartMic, type MicErrorCode, type StartMic } from './audio/mic';
@@ -57,6 +58,8 @@ export interface AppProps {
   visibility?: PageVisibility;
   /** Screen Wake Lock API; defaults to `navigator.wakeLock`, `null` disables it. */
   wakeLock?: WakeLockApi | null;
+  /** For the microphone picker; defaults to `navigator.mediaDevices`. */
+  mediaDevices?: MediaDevicesLike | null;
 }
 
 const defaultVisibility = documentVisibility();
@@ -79,6 +82,7 @@ function Main({
   startMic = realStartMic,
   visibility = defaultVisibility,
   wakeLock: wakeLockApi,
+  mediaDevices,
   settings,
   setSettings,
 }: AppProps & { settings: Settings; setSettings: (s: Settings) => void }) {
@@ -128,6 +132,14 @@ function Main({
     analyzerSettingsRef.current = analyzerSettings;
     engineRef.current?.configure(analyzerSettings);
   }, [analyzerSettings]);
+
+  // The chosen microphone; switching it while listening restarts the session.
+  const { micDeviceId } = settings;
+  useEffect(() => {
+    engineRef.current?.setDevice(micDeviceId).catch((err: unknown) => {
+      setStatus(err instanceof MicError ? err.code : 'engine');
+    });
+  }, [micDeviceId]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -192,7 +204,7 @@ function Main({
 
       {showSettings && (
         <div id="settings" className="card">
-          <SettingsPanel settings={settings} onChange={setSettings} />
+          <SettingsPanel settings={settings} onChange={setSettings} mediaDevices={mediaDevices} />
         </div>
       )}
 

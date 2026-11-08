@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  MAX_DEVICE_ID_LENGTH,
   STORAGE_KEY,
   loadSettings,
   sanitizeSettings,
@@ -67,6 +68,7 @@ describe('settings persistence', () => {
       zones: { green: 5, yellow: 15 },
       drone: { volume: 0.5, octave: 2 },
       lang: 'en',
+      micDeviceId: 'usb-1',
     };
     expect(saveSettings(custom, s)).toBe(true);
     expect(loadSettings(s)).toEqual(custom);
@@ -98,6 +100,18 @@ describe('settings persistence', () => {
     expect(s.naming).toBe('letter');
     expect(s.zones).toEqual({ green: 30, yellow: 30 });
     expect(s.drone).toEqual({ volume: 1, octave: 3 });
+  });
+
+  it('keeps a string device id and drops anything else', () => {
+    expect(DEFAULT_SETTINGS.micDeviceId).toBe('');
+    expect(sanitizeSettings({ micDeviceId: 'abc' }).micDeviceId).toBe('abc');
+    expect(sanitizeSettings({ micDeviceId: 42 }).micDeviceId).toBe('');
+    expect(sanitizeSettings({ micDeviceId: null }).micDeviceId).toBe('');
+    expect(
+      sanitizeSettings({ micDeviceId: 'x'.repeat(MAX_DEVICE_ID_LENGTH + 1) }).micDeviceId,
+    ).toBe('');
+    // Settings saved before this field existed.
+    expect(sanitizeSettings({ clef: 'bass' }).micDeviceId).toBe('');
   });
 
   it('uses window.localStorage by default', () => {

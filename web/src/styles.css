@@ -446,6 +446,11 @@ select:focus-visible {
   color: var(--muted);
 }
 
+.field-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 fieldset.field {
   border: 1px solid var(--border);
   border-radius: 10px;

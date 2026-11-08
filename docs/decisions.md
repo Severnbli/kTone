@@ -21,3 +21,10 @@
 ## 2026-11-08 – Engine loading
 
 - **Decision:** the web app loads the WASM package through `import.meta.glob`, so builds and unit tests work without Rust; when the package is missing or fails to load, the TS mock engine is used. Analysis runs on the main thread; the AudioWorklet only captures audio.
+
+## 2026-11-08 – Recorded voice test fixtures
+
+- **Decision:** test the pitch tracker on five short excerpts (about 11 s, under 1 MB in total) from VocalSet 1.2 (Zenodo, DOI 10.5281/zenodo.1442513, CC BY 4.0): bass and baritone long tones, a soprano F5, a bass C4 with strong vibrato, a sung phrase with consonant onsets and an ascending scale. Clips live in `core/tests/fixtures/voice/` with `SOURCES.md` (attribution, cuts, ground truth); tests in `core/tests/pitch_voice.rs` read them with `hound` (dev-dependency only).
+- **Why:** VocalSet is recorded by professional singers of known voice types, sung from a published score (so every note has a stated target), is mono 16-bit 44.1 kHz WAV, and its license allows redistribution with attribution. Single files can be extracted from the Zenodo archive with HTTP range requests, so the whole 2–6 GB archive is not needed.
+- **Ground truth:** the note from the score, confirmed and refined (median pitch, note boundaries) by an independent offline YIN analysis with a spectral octave check, never by the detector under test.
+- **Alternatives:** freesound.org CC0 vocals (no stated target notes, quality and licenses vary per upload), datasets under NC licenses such as Children's Song Dataset or GTSinger (not compatible with an open-source repository).

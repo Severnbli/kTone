@@ -8,10 +8,12 @@
 // - mic suspended -> status `suspended`; one automatic resume attempt while the
 //   page is visible (now, or when it becomes visible); otherwise the UI offers
 //   `resume()` from a user gesture, which restarts the mic if resuming fails;
-// - page hidden for BACKGROUND_STOP_MS -> stop, stopReason `background`.
+// - page hidden for BACKGROUND_STOP_MS -> stop, stopReason `background`;
+// - input device changed while active -> the mic session is restarted on it.
 
 import type { Analyzer, AnalyzerFactory, AnalyzerSettings } from '../engine/types';
 import { FrameScheduler } from './frameScheduler';
+import type { LevelStore } from './level';
 import { documentVisibility, watchVisibility, type PageVisibility } from './lifecycle';
 import type { MicSession, MicState, StartMic } from './mic';
 import type { PitchStore } from './pitchStore';
@@ -24,6 +26,8 @@ export interface EngineDeps {
   visibility?: PageVisibility;
   /** Defaults to BACKGROUND_STOP_MS. */
   backgroundStopMs?: number;
+  /** Receives the input level of every analysis frame, pitched or not. */
+  levels?: LevelStore;
 }
 
 export type EngineStatus = 'idle' | 'running' | 'suspended';
@@ -45,6 +49,7 @@ export class PitchEngine {
   private readonly listeners = new Set<(state: EngineState) => void>();
   private unwatch: (() => void) | null = null;
   private resuming = false;
+  private deviceId = '';
 
   constructor(
     private readonly store: PitchStore,
@@ -70,9 +75,11 @@ export class PitchEngine {
     if (this.mic) return;
     const gen = ++this.generation;
     this.settings = settings;
+    const deviceId = this.deviceId;
     let scheduler: FrameScheduler | null = null;
     const mic = await this.deps.startMic((block) => scheduler?.push(block), {
       onStateChange: (state) => this.onMicState(gen, state),
+      deviceId: deviceId || undefined,
     });
     if (gen !== this.generation) {
       await mic.stop();
@@ -94,8 +101,13 @@ export class PitchEngine {
     this.analyzer = analyzer;
     this.mic = mic;
     this.store.reset();
+    const levels = this.deps.levels;
+    levels?.reset();
     scheduler = new FrameScheduler(analyzer.frameSize, analyzer.hopSize, (frame) => {
-      this.store.push(analyzer.process(frame), this.deps.now());
+      const now = this.deps.now();
+      const result = analyzer.process(frame);
+      this.store.push(result, now);
+      levels?.push(frame, result !== null, now);
     });
     this.unwatch = watchVisibility(this.deps.visibility ?? documentVisibility(), {
       hiddenTimeoutMs: this.deps.backgroundStopMs,
@@ -108,6 +120,8 @@ export class PitchEngine {
     const state = mic.state;
     if (state === 'ended') return this.halt('ended');
     this.setState({ status: state === 'running' ? 'running' : 'suspended', stopReason: null });
+    // The device was changed while this session was opening.
+    if (deviceId !== this.deviceId) return this.restart();
     if (state === 'suspended') void this.tryResume();
   }
 
@@ -115,6 +129,17 @@ export class PitchEngine {
   configure(settings: AnalyzerSettings): void {
     this.settings = settings;
     this.analyzer?.configure(settings);
+  }
+
+  /**
+   * Selects the audio input (`''` = system default) for the next session.
+   * While active, restarts the mic session on the new device; on failure the
+   * engine goes idle and the error is rethrown.
+   */
+  async setDevice(deviceId: string): Promise<void> {
+    if (deviceId === this.deviceId) return;
+    this.deviceId = deviceId;
+    await this.restart();
   }
 
   /**
@@ -142,6 +167,7 @@ export class PitchEngine {
     } else if (state === 'suspended') {
       if (this.current.status === 'suspended') return;
       this.store.reset();
+      this.deps.levels?.reset();
       this.setState({ status: 'suspended', stopReason: null });
       void this.tryResume();
     } else {
@@ -164,10 +190,26 @@ export class PitchEngine {
     }
   }
 
+  /** Replaces an active session with a fresh one, keeping the reported status. */
+  private async restart(): Promise<void> {
+    const settings = this.settings;
+    if (!this.mic || !settings) return;
+    await this.teardown();
+    this.store.reset();
+    this.deps.levels?.reset();
+    try {
+      await this.start(settings);
+    } catch (err) {
+      this.setState({ status: 'idle', stopReason: null });
+      throw err;
+    }
+  }
+
   private async halt(reason: StopReason): Promise<void> {
     const wasActive = this.mic !== null;
     await this.teardown();
     this.store.reset();
+    this.deps.levels?.reset();
     if (wasActive || reason === 'user') this.setState({ status: 'idle', stopReason: reason });
   }
 

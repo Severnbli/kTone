@@ -19,6 +19,8 @@ export interface Settings {
   degreeStyle: DegreeStyle;
   zones: ZoneThresholds;
   drone: { volume: number; octave: number };
+  /** Audio input `deviceId`; `''` is the system default. */
+  micDeviceId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -30,7 +32,11 @@ export const DEFAULT_SETTINGS: Settings = {
   degreeStyle: 'roman',
   zones: { green: 10, yellow: 25 },
   drone: { volume: 0.3, octave: 3 },
+  micDeviceId: '',
 };
+
+/** Device ids are opaque strings (Chrome: 64 hex chars); anything longer is junk. */
+export const MAX_DEVICE_ID_LENGTH = 256;
 
 export const STORAGE_KEY = 'ktone.settings.v1';
 
@@ -64,6 +70,10 @@ export function sanitizeSettings(raw: unknown): Settings {
         ? (droneRaw.octave as number)
         : d.drone.octave,
     },
+    micDeviceId:
+      typeof r.micDeviceId === 'string' && r.micDeviceId.length <= MAX_DEVICE_ID_LENGTH
+        ? r.micDeviceId
+        : d.micDeviceId,
   };
 }
 

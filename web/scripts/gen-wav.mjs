@@ -1,5 +1,6 @@
 // Generates the fake microphone inputs used by the Playwright tests:
-// steady sines as 16-bit mono PCM WAV files in e2e/fixtures/.
+// steady sines as 16-bit mono PCM WAV files in e2e/fixtures/. Each entry is
+// a frequency, or `[frequency, amplitude]` (default amplitude 0.5).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,10 @@ const SECONDS = 4;
 const FIXTURES = {
   'a440.wav': 440, // A4
   'a466.wav': 440 * 2 ** (1 / 12), // A♯4 / B♭4
+  // A4 at −55 dBFS RMS: above the noise floor, below the analyzer gate (−46).
+  'a440-quiet.wav': [440, Math.SQRT2 * 10 ** (-55 / 20)],
+  // A4 at full scale: clips.
+  'a440-loud.wav': [440, 1],
 };
 
 function sineWav(hz, seconds = SECONDS, sampleRate = SAMPLE_RATE, amplitude = 0.5) {
@@ -40,7 +45,8 @@ function sineWav(hz, seconds = SECONDS, sampleRate = SAMPLE_RATE, amplitude = 0.
 
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'e2e', 'fixtures');
 mkdirSync(outDir, { recursive: true });
-for (const [name, hz] of Object.entries(FIXTURES)) {
-  writeFileSync(join(outDir, name), sineWav(hz));
-  console.log(`wrote ${name} (${hz.toFixed(2)} Hz)`);
+for (const [name, spec] of Object.entries(FIXTURES)) {
+  const [hz, amplitude = 0.5] = Array.isArray(spec) ? spec : [spec];
+  writeFileSync(join(outDir, name), sineWav(hz, SECONDS, SAMPLE_RATE, amplitude));
+  console.log(`wrote ${name} (${hz.toFixed(2)} Hz, amplitude ${amplitude.toFixed(4)})`);
 }

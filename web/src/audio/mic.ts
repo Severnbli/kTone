@@ -38,6 +38,11 @@ export interface MicOptions {
   blockSize?: number;
   /** Called when the session state changes (not called for `stop()`). */
   onStateChange?: (state: MicState) => void;
+  /**
+   * `deviceId` of the audio input to open; empty or missing means the system
+   * default. A device that is gone falls back to the default.
+   */
+  deviceId?: string;
 }
 
 export type StartMic = (
@@ -87,8 +92,12 @@ export function watchMicState(
 
 export const WORKLET_URL = `${import.meta.env.BASE_URL}pitch-worklet.js`;
 
+function errorName(err: unknown): string {
+  return err && typeof err === 'object' ? String((err as Error).name ?? '') : '';
+}
+
 export function classifyMicError(err: unknown): MicErrorCode {
-  const name = err instanceof Error || (err && typeof err === 'object') ? (err as Error).name : '';
+  const name = errorName(err);
   if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError')
     return 'denied';
   if (
@@ -100,12 +109,51 @@ export function classifyMicError(err: unknown): MicErrorCode {
   return 'error';
 }
 
+/** Raw input only: every browser voice processing step off, mono, optionally an exact device. */
+export function micConstraints(deviceId?: string): MediaStreamConstraints {
+  return {
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    },
+    video: false,
+  };
+}
+
+const MISSING_DEVICE = new Set(['OverconstrainedError', 'NotFoundError', 'DevicesNotFoundError']);
+
+/**
+ * Opens the microphone stream. When a specific device was asked for and it is
+ * gone (stale id: `OverconstrainedError` / `NotFoundError`), retries once with
+ * the system default. Throws MicError.
+ */
+export async function openMicStream(
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+  deviceId?: string,
+): Promise<MediaStream> {
+  try {
+    return await getUserMedia(micConstraints(deviceId));
+  } catch (err) {
+    if (!deviceId || !MISSING_DEVICE.has(errorName(err))) {
+      throw new MicError(classifyMicError(err), err);
+    }
+  }
+  try {
+    return await getUserMedia(micConstraints());
+  } catch (err) {
+    throw new MicError(classifyMicError(err), err);
+  }
+}
+
 /**
  * Must be called from a user gesture (creates/resumes the AudioContext).
  * `onBlock` receives a block that is only valid during the call.
  */
 export const startMic: StartMic = async (onBlock, options = {}) => {
-  const { blockSize = 512, onStateChange } = options;
+  const { blockSize = 512, onStateChange, deviceId } = options;
   if (
     typeof navigator === 'undefined' ||
     !navigator.mediaDevices?.getUserMedia ||
@@ -114,20 +162,8 @@ export const startMic: StartMic = async (onBlock, options = {}) => {
   ) {
     throw new MicError('unsupported');
   }
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
-      video: false,
-    });
-  } catch (err) {
-    throw new MicError(classifyMicError(err), err);
-  }
+  const md = navigator.mediaDevices;
+  const stream = await openMicStream((c) => md.getUserMedia(c), deviceId);
 
   const ctx = new AudioContext({ latencyHint: 'interactive' });
   try {

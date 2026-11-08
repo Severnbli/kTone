@@ -333,6 +333,58 @@ select:focus-visible {
   color: var(--zone-red);
 }
 
+/* Input level meter */
+.level {
+  padding: 8px 4px 0;
+}
+
+.level-meter {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.level-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--muted);
+  transition: width 40ms linear;
+}
+
+.level-meter[data-state='ok'] .level-fill {
+  background: var(--zone-green);
+}
+
+.level-meter[data-state='clip'] .level-fill {
+  background: var(--zone-red);
+}
+
+.level-gate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  opacity: 0.55;
+}
+
+.level-hint {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--zone-yellow);
+  text-align: center;
+}
+
+.level-hint[data-hint='loud'] {
+  color: var(--zone-red);
+}
+
 /* Staff */
 .staff {
   display: block;
@@ -391,6 +443,11 @@ select:focus-visible {
 .field > span,
 .field > legend {
   font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-note {
+  font-size: 0.8rem;
   color: var(--muted);
 }
 

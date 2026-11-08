@@ -1,6 +1,7 @@
 // Fakes for browser lifecycle APIs used by unit and component tests.
 
 import { vi } from 'vitest';
+import type { MediaDevicesLike } from '../audio/devices';
 import type { PageVisibility } from '../audio/lifecycle';
 import type { MicOptions, MicState, StartMic } from '../audio/mic';
 import type { WakeLockApi, WakeLockSentinelLike } from '../audio/wakeLock';
@@ -172,6 +173,36 @@ function param() {
     cancelScheduledValues: () => undefined,
   };
 }
+
+type FakeDevice = Pick<MediaDeviceInfo, 'deviceId' | 'kind' | 'label'>;
+
+/** MediaDevices with a settable device list; `plug` fires `devicechange`. */
+export function fakeMediaDevices(initial: FakeDevice[] = []) {
+  let devices = initial;
+  const listeners = new Set<() => void>();
+  const md: MediaDevicesLike & {
+    plug(next: FakeDevice[]): void;
+    readonly listeners: number;
+  } = {
+    enumerateDevices: vi.fn(async () => devices.map((d) => ({ ...d }))),
+    addEventListener: (_, l) => void listeners.add(l),
+    removeEventListener: (_, l) => void listeners.delete(l),
+    plug(next) {
+      devices = next;
+      listeners.forEach((l) => l());
+    },
+    get listeners() {
+      return listeners.size;
+    },
+  };
+  return md;
+}
+
+export const audioInput = (deviceId: string, label = ''): FakeDevice => ({
+  deviceId,
+  kind: 'audioinput',
+  label,
+});
 
 /** Lets pending promise callbacks run. */
 export async function flush(times = 5): Promise<void> {

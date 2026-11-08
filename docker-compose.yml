@@ -1,7 +1,9 @@
 services:
   # One-off toolchain container: docker compose run --rm dev cargo test
   dev:
-    build: .
+    build:
+      context: .
+      target: dev
     image: ktone-dev:latest
     working_dir: /work
     volumes:
@@ -12,7 +14,9 @@ services:
 
   # Prototype: builds the WASM core and serves the web app on http://localhost:5173
   web:
-    build: .
+    build:
+      context: .
+      target: dev
     image: ktone-dev:latest
     working_dir: /work
     command: sh -c "pnpm -C web install --frozen-lockfile && pnpm -C web wasm && pnpm -C web dev --host 0.0.0.0"
@@ -22,6 +26,16 @@ services:
       - .:/work
       - cargo-registry:/usr/local/cargo/registry
       - pnpm-store:/home/node/.local/share/pnpm/store
+
+  # Production image (nginx + static build): docker compose --profile prod up app
+  app:
+    build:
+      context: .
+      target: runtime
+    image: severnbli/ktone:local
+    ports:
+      - "8080:80"
+    profiles: ["prod"]
 
 volumes:
   cargo-registry:

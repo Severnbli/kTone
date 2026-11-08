@@ -5,3 +5,4 @@ web/src/wasm-pkg/
 web/test-results/
 web/playwright-report/
 .DS_Store
+.claude/worktrees/

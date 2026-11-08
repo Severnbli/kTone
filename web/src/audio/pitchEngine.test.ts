@@ -227,6 +227,79 @@ describe('PitchEngine lifecycle', () => {
   });
 });
 
+describe('PitchEngine input device', () => {
+  function setup() {
+    const mic = fakeMic();
+    const store = new PitchStore();
+    const engine = new PitchEngine(store, {
+      factory: createMockAnalyzer,
+      startMic: mic.startMic,
+      now: () => 0,
+      visibility: fakeVisibility(),
+    });
+    const states: EngineState[] = [];
+    engine.subscribe((s) => states.push(s));
+    const deviceOf = (call: number) => mic.startMic.mock.calls[call][1]?.deviceId;
+    return { mic, store, engine, states, deviceOf };
+  }
+
+  it('opens the system default unless a device is set', async () => {
+    const { engine, mic, deviceOf } = setup();
+    await engine.start(settings);
+    expect(deviceOf(0)).toBeUndefined();
+    await engine.stop();
+
+    await engine.setDevice('usb-1');
+    expect(mic.startMic).toHaveBeenCalledTimes(1);
+    await engine.start(settings);
+    expect(deviceOf(1)).toBe('usb-1');
+  });
+
+  it('restarts the mic session on a device change while running', async () => {
+    const { engine, mic, store, states, deviceOf } = setup();
+    await engine.start(settings);
+    mic.feedSine(440, 2048);
+    expect(store.getNote()).not.toBeNull();
+
+    await engine.setDevice('usb-1');
+    expect(mic.stop).toHaveBeenCalledTimes(1);
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    expect(deviceOf(1)).toBe('usb-1');
+    expect(store.getNote()).toBeNull();
+    expect(engine.state).toEqual({ status: 'running', stopReason: null });
+    // No idle flash in between.
+    expect(states.map((s) => s.status)).toEqual(['running']);
+
+    // Same device: nothing happens. Back to default: restart without an id.
+    await engine.setDevice('usb-1');
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    await engine.setDevice('');
+    expect(deviceOf(2)).toBeUndefined();
+
+    mic.feedSine(440, 2048);
+    expect(store.getNote()?.note.letter).toBe('A');
+  });
+
+  it('goes idle and rethrows when the new device fails to open', async () => {
+    const { engine, mic } = setup();
+    await engine.start(settings);
+    mic.startMic.mockRejectedValueOnce(new MicError('error'));
+    await expect(engine.setDevice('broken')).rejects.toMatchObject({ code: 'error' });
+    expect(engine.running).toBe(false);
+    expect(engine.state).toEqual({ status: 'idle', stopReason: null });
+  });
+
+  it('switches to a device chosen while the session was still opening', async () => {
+    const { engine, deviceOf, mic } = setup();
+    const starting = engine.start(settings);
+    const switching = engine.setDevice('usb-1');
+    await Promise.all([starting, switching]);
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    expect(deviceOf(1)).toBe('usb-1');
+    expect(engine.state.status).toBe('running');
+  });
+});
+
 describe('classifyMicError', () => {
   it('maps DOMException names', () => {
     expect(classifyMicError(new DOMException('x', 'NotAllowedError'))).toBe('denied');

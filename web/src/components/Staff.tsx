@@ -32,8 +32,8 @@ const CLEF_GLYPHS: Record<ClefId, ClefGlyph> = {
   treble: { char: '\u{1D11E}', baseline: -1.4, size: 58 },
   treble8vb: { char: '\u{1D11E}', baseline: -1.4, size: 58, octaveBelow: true },
   bass: { char: '\u{1D122}', baseline: 2.0, size: 46 },
-  alto: { char: '\u{1D121}', baseline: 0, size: 40 },
-  tenor: { char: '\u{1D121}', baseline: 2, size: 40 },
+  alto: { char: '\u{1D121}', baseline: 0.4, size: 48 },
+  tenor: { char: '\u{1D121}', baseline: 2.4, size: 48 },
 };
 
 export interface StaffProps {
@@ -77,7 +77,7 @@ export function StaffView({ clef, signature, note, staffStep, active = true, lab
         {glyph.char}
       </text>
       {glyph.octaveBelow && (
-        <text className="clef-octave" x={22} y={y(-5.5)} fontSize={11} textAnchor="middle">
+        <text className="clef-octave" x={28} y={y(-7.5)} fontSize={11} textAnchor="middle">
           8
         </text>
       )}

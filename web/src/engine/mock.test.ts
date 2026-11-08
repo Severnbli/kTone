@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { KeySpec } from './types';
+import type { Analyzer, KeySpec, PitchFrame } from './types';
 import { createMockAnalyzer, detectPitch, spellInKey } from './mock';
 import { createAnalyzer } from './index';
 
@@ -142,6 +142,69 @@ describe('mock analyzer', () => {
     expect(g.note).toMatchObject({ letter: 'A', accidental: 1 });
     expect(g.inKey).toBe(false);
     expect(g.degree).toBeNull();
+  });
+
+  describe('vibrato center', () => {
+    /** Continuous signal with pitch `midi(t)`, analyzed hop by hop. */
+    function run(a: Analyzer, seconds: number, midi: (t: number) => number) {
+      const n = Math.floor(seconds * SR);
+      const signal = new Float32Array(n);
+      let phase = 0;
+      for (let i = 0; i < n; i++) {
+        signal[i] = 0.4 * Math.sin(phase);
+        phase += (2 * Math.PI * 440 * Math.pow(2, (midi(i / SR) - 69) / 12)) / SR;
+      }
+      const out: { t: number; f: PitchFrame | null }[] = [];
+      for (let start = 0; start + a.frameSize <= n; start += a.hopSize) {
+        const f = a.process(signal.subarray(start, start + a.frameSize));
+        out.push({ t: (start + a.frameSize) / SR, f });
+      }
+      return out;
+    }
+    const vibrato = (center: number) => (t: number) =>
+      center + 0.4 * Math.sin(2 * Math.PI * 5.5 * t);
+
+    it('stays near the center of a ±40 cent vibrato while raw cents swing', async () => {
+      const a = await createMockAnalyzer(SR);
+      const frames = run(a, 1.5, vibrato(69))
+        .filter(({ t }) => t > 0.5)
+        .map(({ f }) => f!);
+      expect(frames.every((f) => f.stableMidi === 69)).toBe(true);
+      expect(Math.max(...frames.map((f) => Math.abs(f.centerCents)))).toBeLessThan(6);
+      expect(Math.max(...frames.map((f) => f.cents))).toBeGreaterThan(30);
+      expect(Math.min(...frames.map((f) => f.cents))).toBeLessThan(-30);
+      for (const f of frames) {
+        expect(f.centerCents).toBeCloseTo((f.centerMidi - f.stableMidi) * 100, 3);
+      }
+    });
+
+    it('reports an off-center vibrato', async () => {
+      const a = await createMockAnalyzer(SR);
+      const frames = run(a, 1.5, vibrato(69.2)).filter(({ t }) => t > 0.5);
+      for (const { f } of frames) expect(Math.abs(f!.centerCents - 20)).toBeLessThan(6);
+    });
+
+    it('restarts on a new note so a leap is not dragged', async () => {
+      const a = await createMockAnalyzer(SR);
+      const frames = run(a, 1.5, (t) => (t < 1 ? 60 : 64)).filter(({ t }) => t > 1.1);
+      for (const { f } of frames) {
+        expect(f!.stableMidi).toBe(64);
+        expect(Math.abs(f!.centerCents)).toBeLessThan(3);
+      }
+    });
+
+    it('restarts after a pause but not after a single dropout', async () => {
+      const a = await createMockAnalyzer(SR);
+      const silence = new Float32Array(a.frameSize);
+      run(a, 0.5, () => 69);
+      a.process(silence);
+      const kept = run(a, 0.06, () => 69.3).at(-1)!.f!;
+      expect(kept.centerCents).toBeLessThan(25);
+      for (let i = 0; i < 4; i++) a.process(silence);
+      const fresh = run(a, 0.06, () => 69.3).at(-1)!.f!;
+      expect(fresh.stableMidi).toBe(69);
+      expect(Math.abs(fresh.centerCents - 30)).toBeLessThan(3);
+    });
   });
 
   it('detectPitch returns null below the threshold', () => {

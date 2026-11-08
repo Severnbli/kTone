@@ -49,6 +49,20 @@ describe('CentsGauge', () => {
     expect(gauge).toHaveAttribute('data-zone', 'red');
   });
 
+  it('follows the vibrato center, not the per-frame pitch', () => {
+    const { store, gauge } = setup();
+    const needle = screen.getByTestId('gauge-needle');
+    for (const [i, raw] of [40, -38, 35, -40].entries()) {
+      act(() => store.push(frame(69, raw, { centerCents: 3 }), i * 10));
+      expect(gauge).toHaveAttribute('data-zone', 'green');
+      expect(gauge).toHaveAttribute('aria-valuenow', '3');
+      expect(screen.getByTestId('gauge-readout')).toHaveTextContent('+3');
+      expect(needle.style.left).toBe('53%');
+    }
+    act(() => store.push(frame(69, 0, { centerCents: -20 }), 50));
+    expect(gauge).toHaveAttribute('data-zone', 'yellow');
+  });
+
   it('returns to no zone on silence', () => {
     const { store, gauge } = setup();
     act(() => store.push(frame(69, 0), 0));

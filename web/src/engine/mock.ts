@@ -25,6 +25,10 @@ const YIN_THRESHOLD = 0.15;
 const SILENCE_RMS = 0.01;
 /** Extra cents past the half-semitone boundary before the stable note changes. */
 const HYSTERESIS_CENTS = 15;
+/** Vibrato-center window, as in the Rust core (`CENTER_WINDOW_SECS`). */
+const CENTER_WINDOW_SECS = 0.3;
+/** Unpitched frames in a row after which the center history is dropped. */
+const GAP_RESET_FRAMES = 4;
 
 const SHARP_NAMES: [Letter, number][] = [
   ['C', 0],
@@ -124,12 +128,52 @@ class MockAnalyzer implements Analyzer {
   private settings: AnalyzerSettings = { key: DEFAULT_KEY, clef: 'treble', a4Hz: 440 };
   private stableMidi: number | null = null;
   private readonly diff = new Float32Array(FRAME_SIZE / 2);
+  /** Ring of recent MIDI values of the current note for the vibrato center. */
+  private readonly centerHist: Float64Array;
+  private centerLen = 0;
+  private centerPos = 0;
+  private invalidRun = 0;
 
-  constructor(private readonly sampleRate: number) {}
+  constructor(private readonly sampleRate: number) {
+    const frames = Math.round((CENTER_WINDOW_SECS * sampleRate) / HOP_SIZE);
+    this.centerHist = new Float64Array(Math.max(1, Math.min(255, frames || 1)));
+  }
 
   configure(settings: AnalyzerSettings): void {
-    if (settings.a4Hz !== this.settings.a4Hz) this.stableMidi = null;
+    if (settings.a4Hz !== this.settings.a4Hz) {
+      this.stableMidi = null;
+      this.clearCenter();
+    }
     this.settings = { ...settings, key: { ...settings.key } };
+  }
+
+  private clearCenter(): void {
+    this.centerLen = 0;
+    this.centerPos = 0;
+  }
+
+  private unpitched(): null {
+    this.invalidRun++;
+    if (this.invalidRun >= GAP_RESET_FRAMES) this.clearCenter();
+    return null;
+  }
+
+  /** Triangular-weighted mean of the center ring (same as the Rust core). */
+  private pushCenter(midi: number): number {
+    const cap = this.centerHist.length;
+    this.centerHist[this.centerPos] = midi;
+    this.centerPos = (this.centerPos + 1) % cap;
+    this.centerLen = Math.min(this.centerLen + 1, cap);
+    const len = this.centerLen;
+    const oldest = (this.centerPos - len + cap) % cap;
+    let sum = 0;
+    let weights = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.min(i + 1, len - i);
+      sum += w * this.centerHist[(oldest + i) % cap];
+      weights += w;
+    }
+    return sum / weights;
   }
 
   process(frame: Float32Array): PitchFrame | null {
@@ -139,18 +183,23 @@ class MockAnalyzer implements Analyzer {
     let energy = 0;
     for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
     const rms = Math.sqrt(energy / frame.length);
-    if (rms < SILENCE_RMS) return null;
+    if (rms < SILENCE_RMS) return this.unpitched();
     const pitch = detectPitch(frame, this.sampleRate, this.diff);
-    if (!pitch) return null;
+    if (!pitch) return this.unpitched();
+    this.invalidRun = 0;
     const [frequencyHz, clarity] = pitch;
     const midi = hzToMidi(frequencyHz, this.settings.a4Hz);
     if (
       this.stableMidi === null ||
       Math.abs(midi - this.stableMidi) * 100 > 50 + HYSTERESIS_CENTS
     ) {
-      this.stableMidi = Math.round(midi);
+      const next = Math.round(midi);
+      // A new note: do not drag the center from the previous one.
+      if (next !== this.stableMidi) this.clearCenter();
+      this.stableMidi = next;
     }
     const stableMidi = this.stableMidi;
+    const centerMidi = this.pushCenter(midi);
     const note = this.spell(stableMidi);
     const degree = degreeInKey(stableMidi, this.settings.key);
     return {
@@ -164,6 +213,8 @@ class MockAnalyzer implements Analyzer {
       degree,
       inKey: degree !== null,
       staffStep: staffStepFor(note, this.settings.clef),
+      centerMidi,
+      centerCents: (centerMidi - stableMidi) * 100,
     };
   }
 
@@ -181,6 +232,7 @@ class MockAnalyzer implements Analyzer {
 
   dispose(): void {
     this.stableMidi = null;
+    this.clearCenter();
   }
 }
 

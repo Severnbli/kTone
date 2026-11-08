@@ -152,6 +152,9 @@ fn bright() -> Vec<f64> {
 const AH: [f64; 10] = [1.0, 0.8, 0.6, 0.5, 0.35, 0.25, 0.2, 0.15, 0.1, 0.08];
 /// Dark, soft "u" vowel: almost a sine (third harmonic at -20 dB).
 const OO: [f64; 6] = [1.0, 0.3, 0.1, 0.05, 0.03, 0.02];
+/// "o" vowel with its first formant on the 4th harmonic (e.g. around C3):
+/// what survives the drone fit is mostly even harmonics.
+const O4: [f64; 9] = [0.4, 0.5, 0.5, 1.0, 0.45, 0.25, 0.15, 0.1, 0.05];
 
 fn mix(parts: &[(&[f64], f64)], noise_rms: f64, seed: u64) -> Vec<f32> {
     let n = parts.iter().map(|(p, _)| p.len()).min().unwrap_or(0);
@@ -315,6 +318,28 @@ fn voice_on_the_drone_pitch_is_still_detected() {
     }
     println!("false rejects, voice 6 dB above the drone: {worst_louder:.3}");
     println!("false rejects, voice at the drone level: {worst_equal:.3}");
+}
+
+#[test]
+fn octave_correction_needs_a_voice_an_octave_above_the_drone() {
+    for &m in &DRONE_MIDIS[..5] {
+        // On the tonic with a strong 4th harmonic, and an octave up loud
+        // enough to be detected directly: neither may be doubled.
+        for (target, rel, h) in [
+            (m, 1.0, &O4[..]),
+            (m, 2.0, &O4[..]),
+            (m + 12.0, 4.0, &AH[..]),
+            (m + 12.0, 16.0, &AH[..]),
+            (m + 12.0, 16.0, &bright()),
+        ] {
+            let signal = voice_with_drone(m, rel, h, 17, |_| target);
+            let miss = miss_rate(m, &signal, target as i32);
+            assert!(
+                miss <= 0.02,
+                "{target} over drone {m} (x{rel}): missed {miss:.3}"
+            );
+        }
+    }
 }
 
 #[test]

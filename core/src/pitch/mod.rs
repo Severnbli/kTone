@@ -61,11 +61,15 @@ const MAX_CENTER_WINDOW: usize = 255;
 /// Partials of the app drone as multiples of its frequency: a sine on the
 /// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
 pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
-/// Residual clarity at half the detected period above which a drone-pitched
-/// frame is taken as a voice an octave above the drone.
-const OCTAVE_UP_CLARITY: f64 = 0.8;
-/// Frames within this many cents of the drone (or an octave of it) get the
-/// octave-up check; only those within `drone_tolerance_cents` can be rejected.
+/// Residual clarity at half the detected period above which a frame on the
+/// drone pitch is taken as a voice an octave above the drone: the odd
+/// harmonics of the drone pitch left after the fit (3, 5, 7, 9) must be
+/// about 13 dB weaker than the even ones (4, 8), which a voice on the drone
+/// pitch, whose formants span neighboring harmonics, does not do.
+const OCTAVE_UP_CLARITY: f64 = 0.9;
+
+/// Frames within this many cents of the drone (or an octave of it) are fitted;
+/// only those within `drone_tolerance_cents` can be rejected.
 const OCTAVE_UP_WINDOW_CENTS: f64 = 60.0;
 /// Partials above this fraction of the sample rate are not fitted.
 const MAX_PARTIAL_FRACTION: f64 = 0.45;
@@ -764,7 +768,11 @@ impl PitchTracker {
                 half_clarity = half_clarity.max(h.clarity);
             }
         }
-        if half_clarity >= OCTAVE_UP_CLARITY && 2.0 * f0 <= self.config.max_hz as f64 {
+        // Only when the detected pitch is the drone itself: the harmonics of a
+        // voice detected an octave above it (at 2f: 2f, 6f and 10f removed) are
+        // all even multiples of f and would always look "an octave up".
+        let on_drone = octaves == 0.0;
+        if on_drone && half_clarity >= OCTAVE_UP_CLARITY && 2.0 * f0 <= self.config.max_hz as f64 {
             DroneCheck::VoiceOctaveUp
         } else {
             DroneCheck::Voice

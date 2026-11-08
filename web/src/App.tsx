@@ -112,6 +112,9 @@ function Main({
   useEffect(() => {
     wakeLockRef.current?.set('mic', status === 'running');
   }, [status]);
+  const onDronePlaying = useCallback((playing: boolean) => {
+    wakeLockRef.current?.set('drone', playing);
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
 
   const { key, clef, a4Hz } = settings;
@@ -240,6 +243,8 @@ function Main({
             settings={settings}
             naming={settings.naming}
             onChange={(drone) => setSettings({ ...settings, drone })}
+            onPlayingChange={onDronePlaying}
+            visibility={visibility}
           />
         </div>
       </main>

@@ -112,6 +112,67 @@ export function fakeWakeLock() {
   return { api, sentinels, held };
 }
 
+/** Just enough AudioContext for the drone graph, with a controllable state. */
+export class FakeAudioContext extends EventTarget {
+  state: string = 'suspended';
+  currentTime = 0;
+  resumeWorks = true;
+  readonly destination = {};
+  readonly oscillators: { started: boolean; stopped: boolean }[] = [];
+  resume = vi.fn(async () => {
+    if (this.resumeWorks) this.state = 'running';
+  });
+  close = vi.fn(async () => {
+    this.state = 'closed';
+  });
+
+  /** Simulates the system pausing or resuming audio. */
+  setState(state: string): void {
+    this.state = state;
+    this.dispatchEvent(new Event('statechange'));
+  }
+
+  createGain() {
+    return { gain: param(), connect: (n: unknown) => n, disconnect: () => undefined };
+  }
+
+  createBiquadFilter() {
+    return { type: '', frequency: param(), connect: (n: unknown) => n };
+  }
+
+  createOscillator() {
+    const osc = {
+      type: '',
+      frequency: param(),
+      started: false,
+      stopped: false,
+      connect: (n: unknown) => n,
+      start: () => {
+        osc.started = true;
+      },
+      stop: () => {
+        osc.stopped = true;
+      },
+    };
+    this.oscillators.push(osc);
+    return osc;
+  }
+
+  asAudioContext(): AudioContext {
+    return this as unknown as AudioContext;
+  }
+}
+
+function param() {
+  return {
+    value: 0,
+    setValueAtTime: () => undefined,
+    linearRampToValueAtTime: () => undefined,
+    setTargetAtTime: () => undefined,
+    cancelScheduledValues: () => undefined,
+  };
+}
+
 /** Lets pending promise callbacks run. */
 export async function flush(times = 5): Promise<void> {
   for (let i = 0; i < times; i++) await Promise.resolve();

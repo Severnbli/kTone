@@ -2,29 +2,57 @@
 // up, with slow attack/release. Uses its own AudioContext so it works without
 // the microphone. The mic is captured with echo cancellation off, so the drone
 // can leak into detection through speakers; the UI recommends headphones.
+// When the system pauses the context (phone call, Siri, background) the drone
+// reports it via `onPause`; the owner decides whether to `resume()` or stop.
+
+import { isContextPaused, resumeContext } from './lifecycle';
 
 const ATTACK_S = 0.4;
 const RELEASE_S = 0.3;
 const RAMP_S = 0.05;
+
+export type CreateContext = () => AudioContext | null;
+
+const browserContext: CreateContext = () =>
+  typeof AudioContext === 'undefined' ? null : new AudioContext();
 
 export class Drone {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private oscs: OscillatorNode[] = [];
   private volume = 0.3;
+  /** Bumped by stop/dispose so a start still awaiting resume() gives up. */
+  private startGen = 0;
+  /** Called when the system pauses the context while the drone is playing. */
+  onPause: (() => void) | null = null;
+
+  constructor(private readonly createContext: CreateContext = browserContext) {}
 
   get playing(): boolean {
     return this.oscs.length > 0;
   }
 
+  /** True while playing but the context is suspended or interrupted. */
+  get paused(): boolean {
+    return this.playing && !!this.ctx && isContextPaused(this.ctx.state);
+  }
+
   /** Must be called from a user gesture the first time. */
   async start(frequencyHz: number, volume: number): Promise<void> {
-    if (typeof AudioContext === 'undefined') return;
     this.stopNow();
+    const gen = ++this.startGen;
     this.volume = volume;
-    this.ctx ??= new AudioContext();
+    if (!this.ctx) {
+      this.ctx = this.createContext();
+      if (!this.ctx) return;
+      const ctx = this.ctx;
+      ctx.addEventListener('statechange', () => {
+        if (this.ctx === ctx && this.paused) this.onPause?.();
+      });
+    }
     const ctx = this.ctx;
-    await ctx.resume();
+    await resumeContext(ctx);
+    if (gen !== this.startGen || this.ctx !== ctx) return;
     const t = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.setValueAtTime(0, t);
@@ -49,6 +77,12 @@ export class Drone {
     this.oscs.forEach((o) => o.start(t));
   }
 
+  /** Tries to resume a paused drone. Resolves to true when it is audible again. */
+  async resume(): Promise<boolean> {
+    if (!this.ctx || !this.playing) return false;
+    return resumeContext(this.ctx);
+  }
+
   setFrequency(frequencyHz: number): void {
     if (!this.ctx || this.oscs.length === 0) return;
     const t = this.ctx.currentTime;
@@ -63,6 +97,7 @@ export class Drone {
   }
 
   stop(): void {
+    this.startGen++;
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     const master = this.master;
@@ -89,6 +124,7 @@ export class Drone {
   }
 
   async dispose(): Promise<void> {
+    this.startGen++;
     this.stopNow();
     await this.ctx?.close().catch(() => undefined);
     this.ctx = null;

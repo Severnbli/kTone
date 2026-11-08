@@ -22,6 +22,15 @@
 
 - **Decision:** the web app loads the WASM package through `import.meta.glob`, so builds and unit tests work without Rust; when the package is missing or fails to load, the TS mock engine is used. Analysis runs on the main thread; the AudioWorklet only captures audio.
 
+## 2026-11-08 – Offline support and service worker updates
+
+- **Decision:** a small in-repo Vite plugin (`web/sw/precache.ts`) writes `dist/sw.js` at build time: a precache manifest (every emitted file plus the public files, minus source maps and the worker itself) followed by the worker source `web/sw/sw.js`. The cache is named `ktone-<version>`, where the version is a SHA-256 over all precached paths and contents, so every build gets a fresh cache and a byte-different `sw.js`. Paths are relative to the worker scope, so a non-root Vite `base` works.
+- **Fetch strategy:** precached files and all navigations (SPA fallback to `index.html`) are served cache-first from the active build's cache; other requests are not intercepted. A page therefore always runs one consistent build: bundles, `pitch-worklet.js` and the `.wasm` come from the same cache.
+- **Update flow:** the new worker precaches the new build in the background and waits; it does not call `skipWaiting` on its own, so the open page (maybe mid-exercise) is never switched under the user. On the next launch `src/registerSW.ts` sees the waiting worker, sends `SKIP_WAITING` and reloads once on `controllerchange`, right at startup. On activate the worker deletes older `ktone-*` caches and claims the clients. The app also calls `registration.update()` when it returns to the foreground, for long-lived installed PWAs.
+- **Server:** nginx serves `/assets/` (hashed) as `immutable` for a year and everything else (`index.html`, `sw.js`, the worklet, the manifest, icons) as `no-cache`. The precache also fetches with `cache: 'reload'` so a stale HTTP cache cannot leak into a new build's cache.
+- **Alternatives:** Workbox / `vite-plugin-pwa` (heavy dependency and generated code for what is ~100 lines here); network-first navigations (fresh HTML online, but an old worker would then mix a new `index.html` with an old cached worklet); `skipWaiting` on install (immediate updates, but an open page could get a worklet from a different build); a "new version, reload?" prompt (needs UI in `App.tsx`, can be added later on top of the same waiting worker).
+- **Caveats:** an update takes effect on the second launch after deploy (one to download it, one to apply it). With several tabs open, the tab that applies the update reloads, the others keep running and are claimed by the new worker.
+
 ## 2026-11-08 – Recorded voice test fixtures
 
 - **Decision:** test the pitch tracker on five short excerpts (about 11 s, under 1 MB in total) from VocalSet 1.2 (Zenodo, DOI 10.5281/zenodo.1442513, CC BY 4.0): bass and baritone long tones, a soprano F5, a bass C4 with strong vibrato, a sung phrase with consonant onsets and an ascending scale. Clips live in `core/tests/fixtures/voice/` with `SOURCES.md` (attribution, cuts, ground truth); tests in `core/tests/pitch_voice.rs` read them with `hound` (dev-dependency only).

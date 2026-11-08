@@ -9,7 +9,9 @@ export const DRONE_VOICE_CLARITY = 0.5;
 const OCTAVE_UP_CLARITY = 0.9;
 const OCTAVE_UP_WINDOW_CENTS = 60;
 const MAX_PARTIAL_FRACTION = 0.45;
-const DIM = 2 * DRONE_PARTIALS.length + 1;
+/** Polynomial terms of each partial's amplitude: linear, for attack/release ramps (`ENVELOPE_TERMS` in the core). */
+const ENVELOPE_TERMS = 2;
+const DIM = 2 * ENVELOPE_TERMS * DRONE_PARTIALS.length + 1;
 
 export type DroneVerdict = 'voice' | 'voiceOctaveUp' | 'drone';
 
@@ -20,7 +22,10 @@ export interface Residual {
   clarity: number;
 }
 
-/** Least-squares removal of known partials (plus DC) and periodicity of what is left. */
+/**
+ * Least-squares removal of known partials (amplitudes may change linearly
+ * over the frame) plus DC, and periodicity of what is left.
+ */
 export class DroneChecker {
   private readonly x: Float64Array;
   private readonly residual: Float64Array;
@@ -78,14 +83,15 @@ export class DroneChecker {
   private fit(base: number, lag: number): Residual | null {
     const count = this.setupPartials(base);
     if (count === 0) return null;
-    const dim = 2 * count + 1;
+    const dim = 2 * ENVELOPE_TERMS * count + 1;
     const w = dim + 1;
     const { g, basis, x } = this;
+    const n = x.length;
     g.fill(0);
     basis.fill(1);
     this.resetOsc();
-    for (let t = 0; t < x.length; t++) {
-      this.fillBasis(count);
+    for (let t = 0; t < n; t++) {
+      this.fillBasis(count, (t - (n - 1) / 2) / n);
       for (let r = 0; r < dim; r++) {
         const br = basis[r];
         for (let c = r; c < dim; c++) g[r * w + c] += br * basis[c];
@@ -95,8 +101,8 @@ export class DroneChecker {
     for (let r = 0; r < dim; r++) for (let c = 0; c < r; c++) g[r * w + c] = g[c * w + r];
     if (!this.solve(dim)) return null;
     this.resetOsc();
-    for (let t = 0; t < x.length; t++) {
-      this.fillBasis(count);
+    for (let t = 0; t < n; t++) {
+      this.fillBasis(count, (t - (n - 1) / 2) / n);
       let fit = 0;
       for (let k = 0; k < dim; k++) fit += this.coef[k] * basis[k];
       this.residual[t] = x[t] - fit;
@@ -123,16 +129,25 @@ export class DroneChecker {
     this.oscSin.fill(0);
   }
 
-  /** Writes cos/sin of every partial at the current sample, then advances them. */
-  private fillBasis(count: number): void {
+  /**
+   * Writes cos/sin times `u^e` of every partial at the current sample (`u`:
+   * -0.5..0.5 over the frame) and the constant last, then advances the partials.
+   */
+  private fillBasis(count: number, u: number): void {
     for (let j = 0; j < count; j++) {
       const c = this.oscCos[j];
       const s = this.oscSin[j];
-      this.basis[2 * j] = c;
-      this.basis[2 * j + 1] = s;
+      let p = 1;
+      for (let e = 0; e < ENVELOPE_TERMS; e++) {
+        const k = 2 * (j * ENVELOPE_TERMS + e);
+        this.basis[k] = c * p;
+        this.basis[k + 1] = s * p;
+        p *= u;
+      }
       this.oscCos[j] = c * this.stepCos[j] - s * this.stepSin[j];
       this.oscSin[j] = s * this.stepCos[j] + c * this.stepSin[j];
     }
+    this.basis[2 * ENVELOPE_TERMS * count] = 1;
   }
 
   /** Gaussian elimination with partial pivoting on `g` into `coef`. */

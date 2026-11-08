@@ -257,6 +257,31 @@ describe('mock analyzer', () => {
       }
     });
 
+    it('ignores the drone fading in and out', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, true);
+      // Linear attack over 0.4 s from silence, like `drone.ts`, then a release.
+      const gain = (i: number) => Math.min(1, i / (0.4 * SR), Math.max(0, (SR - i) / (0.3 * SR)));
+      const out = runFrames(
+        a,
+        (at) => {
+          const f = droneFrame(D3, at);
+          return f.map((v, i) => v * gain(at + i) + 1e-4 * Math.sin(i * 7.1));
+        },
+        90,
+      );
+      expect(out.filter(({ f }) => f !== null)).toEqual([]);
+    });
+
+    it('ignores a drone heard once the stream starts mid-frame', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, true);
+      // The first blocks of a microphone stream are exact zeros.
+      const out = runFrames(a, (at) => droneFrame(D3, at).map((v, i) => (at + i < 2600 ? 0 : v)));
+      expect(out.filter(({ f }) => f !== null)).toEqual([]);
+      expect(out.at(-1)?.leak).toBe(true);
+    });
+
     it('treats null, zero and NaN as no drone', async () => {
       const a = await createMockAnalyzer(SR);
       for (const off of [null, 0, NaN]) {

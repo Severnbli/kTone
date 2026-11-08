@@ -30,6 +30,26 @@ const HYSTERESIS_CENTS = 15;
 const CENTER_WINDOW_SECS = 0.3;
 /** Unpitched frames in a row after which the center history is dropped. */
 const GAP_RESET_FRAMES = 4;
+/** Samples at or below this magnitude are digital silence (as in the Rust core). */
+const DIGITAL_SILENCE = 1e-6;
+/**
+ * Frames that start or end with this many silent samples are not analyzed:
+ * the stream had not started yet or dropped out (`MIN_SILENT_RUN` in the core).
+ */
+const MIN_SILENT_RUN = 16;
+
+/** True when `frame` starts or ends with `MIN_SILENT_RUN` digitally silent samples. */
+export function hasSilentEdge(frame: Float32Array): boolean {
+  const n = frame.length;
+  if (n < MIN_SILENT_RUN) return false;
+  let lead = true;
+  let trail = true;
+  for (let i = 0; i < MIN_SILENT_RUN; i++) {
+    lead &&= Math.abs(frame[i]) <= DIGITAL_SILENCE;
+    trail &&= Math.abs(frame[n - 1 - i]) <= DIGITAL_SILENCE;
+  }
+  return lead || trail;
+}
 
 const SHARP_NAMES: [Letter, number][] = [
   ['C', 0],
@@ -195,7 +215,7 @@ class MockAnalyzer implements Analyzer {
     let energy = 0;
     for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
     const rms = Math.sqrt(energy / frame.length);
-    if (rms < SILENCE_RMS) return this.unpitched();
+    if (rms < SILENCE_RMS || hasSilentEdge(frame)) return this.unpitched();
     const pitch = detectPitch(frame, this.sampleRate, this.diff);
     if (!pitch) return this.unpitched();
     let [frequencyHz] = pitch;

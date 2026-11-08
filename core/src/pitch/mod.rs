@@ -8,7 +8,9 @@
 //! `0.9 * highest key maximum` and refines it with parabolic interpolation.
 //! [`PitchTracker`] gates the raw estimates (RMS, clarity, frequency range),
 //! guards against octave errors, median-filters in the semitone domain and
-//! applies hysteresis to the displayed note.
+//! applies hysteresis to the displayed note. It also reports the vibrato
+//! center: a triangular-weighted moving average of the accepted estimates over
+//! about 300 ms, which the UI uses to judge accuracy.
 
 mod fft;
 
@@ -38,6 +40,14 @@ const GAP_RESET_FRAMES: u32 = 4;
 const MAX_MEDIAN_WINDOW: usize = 99;
 /// Minimum history length before the octave guard is trusted.
 const OCTAVE_GUARD_MIN_HISTORY: usize = 3;
+/// Length of the vibrato-center window in seconds. With triangular weights the
+/// residual of a 4.5–7 Hz vibrato is at most ~16 % of its depth (under 2 % at
+/// 5.5 Hz), and the group delay is half the window.
+pub const CENTER_WINDOW_SECS: f32 = 0.3;
+/// [`TrackerConfig::center_window`] for hop 512 at 48 kHz (28 * 512 / 48000 ≈ 299 ms).
+const DEFAULT_CENTER_WINDOW: usize = 28;
+/// Upper bound for [`TrackerConfig::center_window`].
+const MAX_CENTER_WINDOW: usize = 255;
 
 /// Raw single-frame estimate from the detector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -270,11 +280,28 @@ pub struct TrackerConfig {
     /// How far (cents) past the midpoint between two semitones the pitch must
     /// move before `stable_midi` switches to the neighbor.
     pub hysteresis_cents: f32,
+    /// Vibrato-center window in frames (clamped to `1..=255`). The default fits
+    /// hop 512 at 48 kHz; use [`TrackerConfig::for_hop`] for other hops/rates.
+    pub center_window: usize,
+}
+
+impl TrackerConfig {
+    /// Default config with `center_window` sized to [`CENTER_WINDOW_SECS`] for
+    /// frames that start `hop` samples apart. Invalid rates or hops keep the default.
+    pub fn for_hop(sample_rate: f32, hop: usize) -> Self {
+        let mut config = Self::default();
+        if sample_rate.is_finite() && sample_rate > 0.0 && hop > 0 {
+            let frames = (CENTER_WINDOW_SECS as f64 * sample_rate as f64 / hop as f64).round();
+            config.center_window = (frames as usize).clamp(1, MAX_CENTER_WINDOW);
+        }
+        config
+    }
 }
 
 impl Default for TrackerConfig {
     /// Voice defaults: 70..1400 Hz, clarity 0.8, RMS 0.005 (about -46 dBFS),
-    /// median over 5 frames (about 50 ms at hop 512), 30 cents hysteresis.
+    /// median over 5 frames (about 50 ms at hop 512), 30 cents hysteresis,
+    /// vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz).
     fn default() -> Self {
         Self {
             min_hz: 70.0,
@@ -283,6 +310,7 @@ impl Default for TrackerConfig {
             rms_threshold: 0.005,
             median_window: 5,
             hysteresis_cents: 30.0,
+            center_window: DEFAULT_CENTER_WINDOW,
         }
     }
 }
@@ -298,6 +326,12 @@ pub struct TrackedPitch {
     pub stable_midi: i32,
     /// Deviation of `midi` from `stable_midi` in cents (may exceed ±50 inside the hysteresis band).
     pub cents: f32,
+    /// Vibrato center: fractional MIDI number averaged over about 300 ms of the
+    /// current note (restarts when `stable_midi` changes or after a pause).
+    /// Judge accuracy by this, not by `midi`.
+    pub center_midi: f32,
+    /// Deviation of `center_midi` from `stable_midi` in cents.
+    pub center_cents: f32,
     /// Clarity of the current frame.
     pub clarity: f32,
     /// RMS level of the current frame.
@@ -323,12 +357,18 @@ pub struct PitchTracker {
     stable: Option<i32>,
     stable_a4: f32,
     invalid_run: u32,
+    /// Ring buffer of accepted (post octave guard, unmedianed) estimates for the
+    /// vibrato center, same units as `history`.
+    center_hist: Vec<f64>,
+    center_len: usize,
+    center_pos: usize,
 }
 
 impl PitchTracker {
-    /// `median_window` is clamped to `1..=99`.
+    /// `median_window` is clamped to `1..=99`, `center_window` to `1..=255`.
     pub fn new(sample_rate: f32, frame_size: usize, config: TrackerConfig) -> Self {
         let window = config.median_window.clamp(1, MAX_MEDIAN_WINDOW);
+        let center_window = config.center_window.clamp(1, MAX_CENTER_WINDOW);
         Self {
             mpm: Mpm::new(sample_rate, frame_size),
             config,
@@ -342,6 +382,9 @@ impl PitchTracker {
             stable: None,
             stable_a4: 0.0,
             invalid_run: 0,
+            center_hist: vec![0.0; center_window],
+            center_len: 0,
+            center_pos: 0,
         }
     }
 
@@ -389,13 +432,25 @@ impl PitchTracker {
             Some(s) if (midi - s as f64).abs() <= band => s,
             _ => midi.round() as i32,
         };
+        if self.stable != Some(stable) {
+            // A new note: do not drag the center from the previous one.
+            self.center_len = 0;
+            self.center_pos = 0;
+        }
         self.stable = Some(stable);
+
+        self.push_center(value);
+        // Semitones at 440 Hz -> MIDI at the configured reference.
+        let a4_shift = 12.0 * (440.0 / a4_hz as f64).log2();
+        let center_midi = self.center() + a4_shift;
 
         Some(TrackedPitch {
             frequency_hz: frequency as f32,
             midi: midi as f32,
             stable_midi: stable,
             cents: ((midi - stable as f64) * 100.0) as f32,
+            center_midi: center_midi as f32,
+            center_cents: ((center_midi - stable as f64) * 100.0) as f32,
             clarity: est.clarity,
             rms: rms as f32,
         })
@@ -413,6 +468,8 @@ impl PitchTracker {
         self.pending_count = 0;
         self.pending_value = 0.0;
         self.stable = None;
+        self.center_len = 0;
+        self.center_pos = 0;
     }
 
     fn invalid(&mut self) -> Option<TrackedPitch> {
@@ -463,6 +520,35 @@ impl PitchTracker {
         self.history[self.hist_pos] = value;
         self.hist_pos = (self.hist_pos + 1) % cap;
         self.hist_len = (self.hist_len + 1).min(cap);
+    }
+
+    fn push_center(&mut self, value: f64) {
+        let cap = self.center_hist.len();
+        self.center_hist[self.center_pos] = value;
+        self.center_pos = (self.center_pos + 1) % cap;
+        self.center_len = (self.center_len + 1).min(cap);
+    }
+
+    /// Triangular-weighted mean of the center history (weights 1, 2, .., 2, 1
+    /// over the filled part, oldest to newest). Two cascaded box filters in
+    /// effect, so vibrato is attenuated far better than by a plain average of
+    /// the same length. The history must not be empty.
+    fn center(&self) -> f64 {
+        let len = self.center_len;
+        let cap = self.center_hist.len();
+        let oldest = (self.center_pos + cap - len) % cap;
+        let mut sum = 0.0;
+        let mut weights = 0.0;
+        for i in 0..len {
+            let w = (i + 1).min(len - i) as f64;
+            sum += w * self.center_hist[(oldest + i) % cap];
+            weights += w;
+        }
+        if weights > 0.0 {
+            sum / weights
+        } else {
+            0.0
+        }
     }
 
     /// Median of the history (mean of the two middle values for an even count).
@@ -587,6 +673,7 @@ mod tests {
         let c = TrackerConfig::default();
         assert!(c.min_hz < 82.0 && c.max_hz > 1047.0);
         assert!(c.median_window % 2 == 1);
+        assert!(c.center_window > c.median_window);
         assert!(c.clarity_threshold > 0.0 && c.clarity_threshold < 1.0);
     }
 }

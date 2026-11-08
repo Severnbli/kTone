@@ -1,0 +1,28 @@
+services:
+  # One-off toolchain container: docker compose run --rm dev cargo test
+  dev:
+    build: .
+    image: ktone-dev:latest
+    working_dir: /work
+    volumes:
+      - .:/work
+      - cargo-registry:/usr/local/cargo/registry
+      - pnpm-store:/home/node/.local/share/pnpm/store
+    profiles: ["tools"]
+
+  # Prototype: builds the WASM core and serves the web app on http://localhost:5173
+  web:
+    build: .
+    image: ktone-dev:latest
+    working_dir: /work
+    command: sh -c "pnpm -C web install --frozen-lockfile && pnpm -C web wasm && pnpm -C web dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/work
+      - cargo-registry:/usr/local/cargo/registry
+      - pnpm-store:/home/node/.local/share/pnpm/store
+
+volumes:
+  cargo-registry:
+  pnpm-store:

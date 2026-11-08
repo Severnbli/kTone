@@ -154,6 +154,21 @@ impl Analyzer {
         ]
     }
 
+    /// Tells the analyzer which drone the app plays (`hz` <= 0 or non-finite:
+    /// none). With `filter`, frames that look like the drone leaking from the
+    /// speakers into the microphone are treated as unpitched; either way
+    /// [`Analyzer::drone_leak`] reports them. Keeps all other state.
+    #[wasm_bindgen(js_name = setDrone)]
+    pub fn set_drone(&mut self, hz: f32, filter: bool) {
+        self.tracker.set_drone(Some(hz), filter);
+    }
+
+    /// `true` when the last `process` call saw the drone leaking into the mic.
+    #[wasm_bindgen(getter, js_name = droneLeak)]
+    pub fn drone_leak(&self) -> bool {
+        self.tracker.drone_leak()
+    }
+
     /// Clears smoothing history.
     pub fn reset(&mut self) {
         self.tracker.reset();

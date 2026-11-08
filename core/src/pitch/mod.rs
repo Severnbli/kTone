@@ -11,6 +11,16 @@
 //! applies hysteresis to the displayed note. It also reports the vibrato
 //! center: a triangular-weighted moving average of the accepted estimates over
 //! about 300 ms, which the UI uses to judge accuracy.
+//!
+//! Drone filter: when the app plays a drone (see [`PitchTracker::set_drone`]),
+//! a frame whose pitch matches the drone (or an octave of it) is checked for
+//! voice content. The known drone partials are removed by a least-squares
+//! sinusoid fit; what is left and still periodic at the detected period is
+//! voice (its other harmonics, jitter, vibrato). If almost nothing is left, the
+//! frame is the drone leaking from the speakers into the mic and is treated as
+//! unpitched. If the residual repeats at half the period, the singer is an
+//! octave above the drone (the mixture fooled the detector) and the pitch is
+//! doubled. See `docs/decisions.md` for the thresholds.
 
 mod fft;
 
@@ -48,6 +58,17 @@ pub const CENTER_WINDOW_SECS: f32 = 0.3;
 const DEFAULT_CENTER_WINDOW: usize = 28;
 /// Upper bound for [`TrackerConfig::center_window`].
 const MAX_CENTER_WINDOW: usize = 255;
+/// Partials of the app drone as multiples of its frequency: a sine on the
+/// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
+pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
+/// Residual clarity at half the detected period above which a drone-pitched
+/// frame is taken as a voice an octave above the drone.
+const OCTAVE_UP_CLARITY: f64 = 0.8;
+/// Frames within this many cents of the drone (or an octave of it) get the
+/// octave-up check; only those within `drone_tolerance_cents` can be rejected.
+const OCTAVE_UP_WINDOW_CENTS: f64 = 60.0;
+/// Partials above this fraction of the sample rate are not fitted.
+const MAX_PARTIAL_FRACTION: f64 = 0.45;
 
 /// Raw single-frame estimate from the detector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +77,18 @@ pub struct PitchEstimate {
     pub frequency_hz: f32,
     /// MPM clarity (normalized peak height), 0.0..=1.0. Higher is more periodic.
     pub clarity: f32,
+}
+
+/// What is left of a frame after removing known partials, see
+/// [`Mpm::periodic_residual`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Residual {
+    /// Energy of the residual that repeats with the given lag, as a fraction
+    /// of the whole frame's energy (0.0..=1.0).
+    pub periodic: f64,
+    /// Normalized correlation of the residual with itself at the lag
+    /// (-1.0..=1.0): near 0 when the residual is just noise.
+    pub clarity: f64,
 }
 
 /// McLeod Pitch Method detector. Allocates only in `new`; `detect` must not allocate.
@@ -72,6 +105,10 @@ pub struct Mpm {
     /// DC-free copy of the current frame.
     x: Vec<f64>,
     nsdf: Vec<f64>,
+    /// `re[..frame_size]` holds the residual of the last `periodic_residual`.
+    has_residual: bool,
+    /// `x` holds the frame of the last `detect` that returned `Some`.
+    has_frame: bool,
 }
 
 impl Mpm {
@@ -104,6 +141,8 @@ impl Mpm {
             im: vec![0.0; fft_size],
             x: vec![0.0; n],
             nsdf: vec![0.0; if usable { max_lag + 2 } else { 0 }],
+            has_residual: false,
+            has_frame: false,
         }
     }
 
@@ -113,6 +152,8 @@ impl Mpm {
     /// Also returns `None` for a frame of the wrong length or containing
     /// NaN/infinite samples. Never panics.
     pub fn detect(&mut self, frame: &[f32]) -> Option<PitchEstimate> {
+        self.has_frame = false;
+        self.has_residual = false;
         if !self.usable || frame.len() != self.frame_size {
             return None;
         }
@@ -147,9 +188,124 @@ impl Mpm {
         if !frequency.is_finite() || frequency <= 0.0 {
             return None;
         }
+        self.has_frame = true;
         Some(PitchEstimate {
             frequency_hz: frequency as f32,
             clarity: clarity as f32,
+        })
+    }
+
+    /// Fraction of the last detected frame's energy that is still periodic
+    /// with `lag` samples after removing sinusoids at `partials_hz` by least
+    /// squares (amplitude and phase of each are fitted, the frequencies are
+    /// given). Near 0 for a frame made of those sinusoids plus noise, large
+    /// for a voice whose other harmonics survive the fit.
+    ///
+    /// Works on the frame of the last `detect` call and returns `None` if it
+    /// did not return `Some`. Partials outside `(0, 0.45 * sample_rate)` and
+    /// beyond the first four are ignored. Also `None` when nothing can be
+    /// fitted, the lag is outside `1..=frame_size / 2` or the fit is
+    /// degenerate. Does not allocate.
+    pub fn periodic_residual(&mut self, partials_hz: &[f64], lag: f64) -> Option<Residual> {
+        const MAX: usize = DRONE_PARTIALS.len();
+        // A constant column too: the DC removal in `detect` subtracts the mean
+        // of the frame, and a partial over a non-integer number of periods has
+        // a non-zero mean that would otherwise look periodic at every lag.
+        const DIM: usize = 2 * MAX + 1;
+        self.has_residual = false;
+        if !self.has_frame {
+            return None;
+        }
+        let mut step = [(1.0f64, 0.0f64); MAX];
+        let mut count = 0;
+        for &f in partials_hz {
+            if count == MAX {
+                break;
+            }
+            if f.is_finite() && f > 0.0 && f < MAX_PARTIAL_FRACTION * self.sample_rate {
+                let w = std::f64::consts::TAU * f / self.sample_rate;
+                step[count] = (w.cos(), w.sin());
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return None;
+        }
+        let dim = 2 * count + 1;
+
+        // Normal equations [G | X^T x] of the fit, built with the basis
+        // cos/sin(w t) advanced by rotation (no trig per sample).
+        let mut g = [[0.0f64; DIM + 1]; DIM];
+        let mut basis = [1.0f64; DIM];
+        let mut osc = [(1.0f64, 0.0f64); MAX];
+        for &x in &self.x {
+            for (j, o) in osc.iter_mut().enumerate().take(count) {
+                basis[2 * j] = o.0;
+                basis[2 * j + 1] = o.1;
+                *o = rotate(*o, step[j]);
+            }
+            for r in 0..dim {
+                let br = basis[r];
+                for (gc, &bc) in g[r][r..dim].iter_mut().zip(&basis[r..dim]) {
+                    *gc += br * bc;
+                }
+                g[r][dim] += br * x;
+            }
+        }
+        for r in 0..dim {
+            for c in 0..r {
+                g[r][c] = g[c][r];
+            }
+        }
+        let coef = solve(&mut g, dim)?;
+
+        // Residual into `re` (free scratch after `detect`).
+        let mut osc = [(1.0f64, 0.0f64); MAX];
+        for (dst, &x) in self.re.iter_mut().zip(&self.x) {
+            let mut fit = coef[dim - 1];
+            for (j, o) in osc.iter_mut().enumerate().take(count) {
+                fit += coef[2 * j] * o.0 + coef[2 * j + 1] * o.1;
+                *o = rotate(*o, step[j]);
+            }
+            *dst = x - fit;
+        }
+        self.has_residual = true;
+        self.residual_at(lag)
+    }
+
+    /// [`Residual`] of the last successful [`Self::periodic_residual`] fit at
+    /// another lag (e.g. half the period, to tell a voice an octave above the
+    /// drone). `None` without such a fit or for a lag outside `1..frame/2`.
+    pub fn residual_at(&self, lag: f64) -> Option<Residual> {
+        let n = self.frame_size;
+        if !(self.has_residual && lag.is_finite() && lag >= 1.0 && lag <= (n / 2) as f64) {
+            return None;
+        }
+        // NSDF-style correlation of the residual at the (fractional) lag,
+        // normalized by the energy of the whole frame over the same span.
+        let li = lag.floor() as usize;
+        let frac = lag - li as f64;
+        let r = &self.re[..n];
+        let x = &self.x;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        let mut res = 0.0;
+        for t in 0..n - li - 1 {
+            let rs = r[t + li] + frac * (r[t + li + 1] - r[t + li]);
+            let xs = x[t + li] + frac * (x[t + li + 1] - x[t + li]);
+            num += r[t] * rs;
+            den += x[t] * x[t] + xs * xs;
+            res += r[t] * r[t] + rs * rs;
+        }
+        let periodic = 2.0 * num / den;
+        let clarity = if res > den * 1e-12 {
+            2.0 * num / res
+        } else {
+            0.0
+        };
+        (periodic.is_finite() && clarity.is_finite()).then_some(Residual {
+            periodic: periodic.max(0.0),
+            clarity: clarity.clamp(-1.0, 1.0),
         })
     }
 
@@ -264,6 +420,42 @@ fn for_each_key_max(
     }
 }
 
+fn rotate((c, s): (f64, f64), (rc, rs): (f64, f64)) -> (f64, f64) {
+    (c * rc - s * rs, s * rc + c * rs)
+}
+
+/// Solves the `dim x dim` system in `a` (augmented with the right-hand side in
+/// column `dim`) by Gaussian elimination with partial pivoting.
+fn solve<const R: usize, const C: usize>(a: &mut [[f64; C]; R], dim: usize) -> Option<[f64; R]> {
+    let scale = (0..dim).map(|i| a[i][i].abs()).fold(0.0, f64::max);
+    if !(scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    for col in 0..dim {
+        let pivot = (col..dim).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;
+        if a[pivot][col].abs() <= scale * 1e-10 {
+            return None;
+        }
+        a.swap(col, pivot);
+        for row in col + 1..dim {
+            let f = a[row][col] / a[col][col];
+            for k in col..=dim {
+                a[row][k] -= f * a[col][k];
+            }
+        }
+    }
+    let mut out = [0.0; R];
+    for row in (0..dim).rev() {
+        let known: f64 = a[row][row + 1..dim]
+            .iter()
+            .zip(&out[row + 1..dim])
+            .map(|(c, v)| c * v)
+            .sum();
+        out[row] = (a[row][dim] - known) / a[row][row];
+    }
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
 /// Tuning knobs for [`PitchTracker`]. `Default` must give good results for voice.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrackerConfig {
@@ -283,6 +475,17 @@ pub struct TrackerConfig {
     /// Vibrato-center window in frames (clamped to `1..=255`). The default fits
     /// hop 512 at 48 kHz; use [`TrackerConfig::for_hop`] for other hops/rates.
     pub center_window: usize,
+    /// How close (cents) the detected pitch must be to the drone or one octave
+    /// of it for the frame to be checked as possible drone leakage.
+    pub drone_tolerance_cents: f32,
+    /// A drone-pitched frame counts as voice only if, after the drone partials
+    /// are removed, at least this fraction of its energy is still periodic at
+    /// the detected period ([`Residual::periodic`])...
+    pub drone_voice_energy: f32,
+    /// ... and the residual correlates with itself at that period at least
+    /// this much ([`Residual::clarity`]), i.e. it is not just noise. Otherwise
+    /// the frame is drone leakage.
+    pub drone_voice_clarity: f32,
 }
 
 impl TrackerConfig {
@@ -301,7 +504,9 @@ impl TrackerConfig {
 impl Default for TrackerConfig {
     /// Voice defaults: 70..1400 Hz, clarity 0.8, RMS 0.005 (about -46 dBFS),
     /// median over 5 frames (about 50 ms at hop 512), 30 cents hysteresis,
-    /// vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz).
+    /// vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
+    /// drone check within ±15 cents; drone-pitched frames need 0.1 % (-30 dB)
+    /// of periodic non-drone energy with residual clarity 0.5 to count as voice.
     fn default() -> Self {
         Self {
             min_hz: 70.0,
@@ -311,6 +516,9 @@ impl Default for TrackerConfig {
             median_window: 5,
             hysteresis_cents: 30.0,
             center_window: DEFAULT_CENTER_WINDOW,
+            drone_tolerance_cents: 15.0,
+            drone_voice_energy: 0.001,
+            drone_voice_clarity: 0.5,
         }
     }
 }
@@ -338,6 +546,19 @@ pub struct TrackedPitch {
     pub rms: f32,
 }
 
+/// Outcome of [`PitchTracker::drone_check`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DroneCheck {
+    /// No drone set.
+    Off,
+    /// Not drone leakage (or not checked: the pitch is not the drone's).
+    Voice,
+    /// Not drone leakage; the voice is an octave above the detected pitch.
+    VoiceOctaveUp,
+    /// Drone leakage.
+    Drone,
+}
+
 /// Detector + gating + median smoothing + octave-error guard + hysteresis.
 /// Allocates only in `new`; `process` must not allocate.
 pub struct PitchTracker {
@@ -362,6 +583,10 @@ pub struct PitchTracker {
     center_hist: Vec<f64>,
     center_len: usize,
     center_pos: usize,
+    /// Frequency of the drone the app plays, 0 when off.
+    drone_hz: f64,
+    drone_filter: bool,
+    drone_leak: bool,
 }
 
 impl PitchTracker {
@@ -385,7 +610,29 @@ impl PitchTracker {
             center_hist: vec![0.0; center_window],
             center_len: 0,
             center_pos: 0,
+            drone_hz: 0.0,
+            drone_filter: false,
+            drone_leak: false,
         }
+    }
+
+    /// Tells the tracker which drone the app is playing: `None`, zero or a
+    /// non-finite frequency means no drone. With `filter`, frames that look
+    /// like the drone leaking from the speakers into the microphone are treated
+    /// as unpitched; with or without it, [`Self::drone_leak`] reports them.
+    /// Resets no other state, so it is safe to call on every drone or A4 change.
+    pub fn set_drone(&mut self, drone_hz: Option<f32>, filter: bool) {
+        self.drone_hz = match drone_hz {
+            Some(hz) if hz.is_finite() && hz > 0.0 => hz as f64,
+            _ => 0.0,
+        };
+        self.drone_filter = filter;
+    }
+
+    /// `true` when the last [`Self::process`] call saw a frame that looks like
+    /// the drone (its pitch and almost no other periodic content).
+    pub fn drone_leak(&self) -> bool {
+        self.drone_leak
     }
 
     /// Process one frame. Returns `None` while silent/unpitched.
@@ -393,6 +640,7 @@ impl PitchTracker {
     /// Also returns `None` for a wrong-length frame, non-finite samples or a
     /// non-positive / non-finite `a4_hz`. Never panics.
     pub fn process(&mut self, frame: &[f32], a4_hz: f32) -> Option<TrackedPitch> {
+        self.drone_leak = false;
         if frame.len() != self.frame_size || !(a4_hz.is_finite() && a4_hz > 0.0) {
             return self.invalid();
         }
@@ -412,6 +660,17 @@ impl PitchTracker {
             est.frequency_hz >= self.config.min_hz && est.frequency_hz <= self.config.max_hz;
         if !(clear_enough && in_range) {
             return self.invalid();
+        }
+        let mut est = est;
+        match self.drone_check(est) {
+            DroneCheck::Drone => {
+                self.drone_leak = true;
+                if self.drone_filter {
+                    return self.invalid();
+                }
+            }
+            DroneCheck::VoiceOctaveUp if self.drone_filter => est.frequency_hz *= 2.0,
+            _ => {}
         }
         self.invalid_run = 0;
 
@@ -460,6 +719,56 @@ impl PitchTracker {
     pub fn reset(&mut self) {
         self.clear_state();
         self.invalid_run = 0;
+        self.drone_leak = false;
+    }
+
+    /// Drone leakage: the pitch is the drone's (or an octave of it) and
+    /// removing the drone partials leaves almost nothing periodic.
+    fn drone_check(&mut self, est: PitchEstimate) -> DroneCheck {
+        let drone = self.drone_hz;
+        let f0 = est.frequency_hz as f64;
+        if drone <= 0.0 {
+            return DroneCheck::Off;
+        }
+        let cents = 1200.0 * (f0 / drone).log2();
+        let octaves = (cents / 1200.0).round();
+        let off = (cents - 1200.0 * octaves).abs();
+        if !(octaves.abs() <= 1.0 && off <= OCTAVE_UP_WINDOW_CENTS) {
+            return DroneCheck::Voice;
+        }
+        let near = off <= self.config.drone_tolerance_cents as f64;
+        // Fit at the nominal drone pitch (exact unless the drone is gliding,
+        // robust to noise) and at the measured one (absorbs glides and clock
+        // differences between output and input); either fit explaining the
+        // frame is enough.
+        //
+        // A voice an octave above a louder drone makes the mixture repeat at
+        // the drone period, so the detector reports about the drone pitch
+        // (the beating can pull it tens of cents off). Without the drone
+        // partials, such a voice repeats at half that period, which a voice on
+        // the drone pitch (odd and even harmonics left) does not.
+        let lag = self.mpm.sample_rate / f0;
+        let measured = f0 / octaves.exp2();
+        let mut half_clarity = f64::NEG_INFINITY;
+        for base in [measured, drone] {
+            let partials = DRONE_PARTIALS.map(|k| k * base);
+            if let Some(r) = self.mpm.periodic_residual(&partials, lag) {
+                // Written as "is drone" checks so NaN thresholds never reject.
+                let drone_like = r.periodic < self.config.drone_voice_energy as f64
+                    || r.clarity < self.config.drone_voice_clarity as f64;
+                if near && drone_like {
+                    return DroneCheck::Drone;
+                }
+            }
+            if let Some(h) = self.mpm.residual_at(lag / 2.0) {
+                half_clarity = half_clarity.max(h.clarity);
+            }
+        }
+        if half_clarity >= OCTAVE_UP_CLARITY && 2.0 * f0 <= self.config.max_hz as f64 {
+            DroneCheck::VoiceOctaveUp
+        } else {
+            DroneCheck::Voice
+        }
     }
 
     fn clear_state(&mut self) {
@@ -666,6 +975,45 @@ mod tests {
         }
         // Window 5 now holds 10, 7, 8, 9, 9.5.
         assert_eq!(t.median(), 9.0);
+    }
+
+    #[test]
+    fn residual_of_fitted_partials_is_empty() {
+        let sr = 48000.0;
+        let n = 2048;
+        let f = 196.0;
+        let frame: Vec<f32> = (0..n)
+            .map(|i| {
+                let ph = 2.0 * std::f64::consts::PI * f * i as f64 / sr;
+                (0.3 * (ph + 0.2).sin() + 0.1 * (2.0 * ph).cos() + 0.02 * (6.0 * ph).sin() + 0.05)
+                    as f32
+            })
+            .collect();
+        let mut mpm = Mpm::new(sr as f32, n);
+        assert!(mpm.residual_at(100.0).is_none(), "no fit yet");
+        assert!(
+            mpm.periodic_residual(&[f], sr / f).is_none(),
+            "no frame yet"
+        );
+        mpm.detect(&frame).unwrap();
+        let partials = [f, 2.0 * f, 6.0 * f, 10.0 * f];
+        let r = mpm.periodic_residual(&partials, sr / f).unwrap();
+        assert!(r.periodic < 1e-9, "{r:?}");
+        // Without the 2nd partial, what is left is periodic.
+        let r = mpm.periodic_residual(&[f, 6.0 * f], sr / f).unwrap();
+        assert!(r.periodic > 0.05 && r.clarity > 0.99, "{r:?}");
+        // The 2nd partial also repeats at half the period.
+        let h = mpm.residual_at(sr / f / 2.0).unwrap();
+        assert!(h.clarity > 0.99, "{h:?}");
+        assert!(mpm.residual_at(0.5).is_none());
+        assert!(mpm.residual_at(n as f64).is_none());
+        assert!(mpm.periodic_residual(&[], sr / f).is_none());
+        assert!(mpm
+            .periodic_residual(&[f64::NAN, -1.0, sr], sr / f)
+            .is_none());
+        // A failed detect invalidates the frame.
+        assert!(mpm.detect(&vec![0.0; n]).is_none());
+        assert!(mpm.periodic_residual(&partials, sr / f).is_none());
     }
 
     #[test]

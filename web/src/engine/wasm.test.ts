@@ -53,6 +53,8 @@ describe.skipIf(!hasWasm)('WASM engine adapter', () => {
     expect(f!.degree).toBe(6);
     expect(f!.inKey).toBe(true);
     expect(f!.staffStep).toBe(3);
+    expect(f!.centerMidi).toBeCloseTo(69, 1);
+    expect(Math.abs(f!.centerCents)).toBeLessThan(3);
     a.dispose();
   });
 

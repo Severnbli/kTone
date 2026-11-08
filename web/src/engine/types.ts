@@ -34,8 +34,15 @@ export interface PitchFrame {
   midi: number;
   /** Note to display; changes only past the hysteresis band. */
   stableMidi: number;
-  /** Deviation of `midi` from `stableMidi` in cents. */
+  /** Deviation of `midi` from `stableMidi` in cents. Per frame: follows the vibrato. */
   cents: number;
+  /**
+   * Vibrato center: fractional MIDI number averaged over about 300 ms of the
+   * current note (restarts on a new stable note and after a pause).
+   */
+  centerMidi: number;
+  /** Deviation of `centerMidi` from `stableMidi` in cents. Judge accuracy by this. */
+  centerCents: number;
   clarity: number;
   rms: number;
   /** `stableMidi` spelled in the configured key. */

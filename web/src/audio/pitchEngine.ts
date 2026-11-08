@@ -12,6 +12,7 @@
 
 import type { Analyzer, AnalyzerFactory, AnalyzerSettings } from '../engine/types';
 import { FrameScheduler } from './frameScheduler';
+import type { LevelStore } from './level';
 import { documentVisibility, watchVisibility, type PageVisibility } from './lifecycle';
 import type { MicSession, MicState, StartMic } from './mic';
 import type { PitchStore } from './pitchStore';
@@ -24,6 +25,8 @@ export interface EngineDeps {
   visibility?: PageVisibility;
   /** Defaults to BACKGROUND_STOP_MS. */
   backgroundStopMs?: number;
+  /** Receives the input level of every analysis frame, pitched or not. */
+  levels?: LevelStore;
 }
 
 export type EngineStatus = 'idle' | 'running' | 'suspended';
@@ -94,8 +97,13 @@ export class PitchEngine {
     this.analyzer = analyzer;
     this.mic = mic;
     this.store.reset();
+    const levels = this.deps.levels;
+    levels?.reset();
     scheduler = new FrameScheduler(analyzer.frameSize, analyzer.hopSize, (frame) => {
-      this.store.push(analyzer.process(frame), this.deps.now());
+      const now = this.deps.now();
+      const result = analyzer.process(frame);
+      this.store.push(result, now);
+      levels?.push(frame, result !== null, now);
     });
     this.unwatch = watchVisibility(this.deps.visibility ?? documentVisibility(), {
       hiddenTimeoutMs: this.deps.backgroundStopMs,
@@ -142,6 +150,7 @@ export class PitchEngine {
     } else if (state === 'suspended') {
       if (this.current.status === 'suspended') return;
       this.store.reset();
+      this.deps.levels?.reset();
       this.setState({ status: 'suspended', stopReason: null });
       void this.tryResume();
     } else {
@@ -168,6 +177,7 @@ export class PitchEngine {
     const wasActive = this.mic !== null;
     await this.teardown();
     this.store.reset();
+    this.deps.levels?.reset();
     if (wasActive || reason === 'user') this.setState({ status: 'idle', stopReason: reason });
   }
 

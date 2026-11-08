@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockAnalyzer } from '../engine/mock';
 import type { AnalyzerSettings } from '../engine/types';
 import { fakeMic, fakeVisibility, flush } from '../test/fakes';
+import { LevelStore } from './level';
 import { MicError, classifyMicError } from './mic';
 import { PitchEngine, type EngineState } from './pitchEngine';
 import { PitchStore } from './pitchStore';
@@ -36,6 +37,35 @@ describe('PitchEngine', () => {
     expect(mic.stop).toHaveBeenCalled();
     expect(engine.running).toBe(false);
     expect(store.getNote()).toBeNull();
+  });
+
+  it('measures the input level of every frame, pitched or not', async () => {
+    const mic = fakeMic();
+    const levels = new LevelStore();
+    const onLevel = vi.fn();
+    levels.subscribeLevel(onLevel);
+    const engine = new PitchEngine(new PitchStore(), {
+      factory: createMockAnalyzer,
+      startMic: mic.startMic,
+      now: () => 0,
+      levels,
+    });
+    await engine.start(settings);
+    onLevel.mockClear();
+    // fakeMic feeds amplitude-0.5 sines: RMS −9 dBFS.
+    mic.feedSine(440, 2048 + 512);
+    expect(onLevel).toHaveBeenCalledTimes(2);
+    expect(levels.level.rmsDb).toBeCloseTo(-9.03, 1);
+    expect(levels.level.peak).toBeCloseTo(0.5, 2);
+
+    // Silence produces no pitch but still updates the level.
+    mic.feedSine(0, 2048);
+    expect(levels.level.rmsDb).toBe(-Infinity);
+    expect(onLevel).toHaveBeenCalledTimes(6);
+
+    mic.feedSine(440, 2048);
+    await engine.stop();
+    expect(levels.level.rmsDb).toBe(-Infinity);
   });
 
   it('propagates mic errors and stays stopped', async () => {

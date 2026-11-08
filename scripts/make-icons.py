@@ -62,7 +62,7 @@ def main() -> None:
     banner.save(BRAND / "banner-readme.png", optimize=True)
 
     for path in sorted(OUT.iterdir()):
-        print(path.relative_to(ROOT))
+        print(path)
 
 
 if __name__ == "__main__":

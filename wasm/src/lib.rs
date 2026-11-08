@@ -9,7 +9,7 @@ use ktone_core::theory::{Clef, Key, Letter, Mode, SpelledNote};
 use wasm_bindgen::prelude::*;
 
 /// Number of `f64` slots written by [`Analyzer::process`].
-pub const FRAME_FIELDS: usize = 12;
+pub const FRAME_FIELDS: usize = 14;
 
 const LETTERS: [Letter; 7] = [
     Letter::C,
@@ -71,7 +71,11 @@ impl Analyzer {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: f32, frame_size: usize, hop_size: usize) -> Analyzer {
         Analyzer {
-            tracker: PitchTracker::new(sample_rate, frame_size, TrackerConfig::default()),
+            tracker: PitchTracker::new(
+                sample_rate,
+                frame_size,
+                TrackerConfig::for_hop(sample_rate, hop_size),
+            ),
             frame_size,
             hop_size,
             key: c_major(),
@@ -110,7 +114,11 @@ impl Analyzer {
 
     /// Processes one frame and writes [`FRAME_FIELDS`] values into `out`:
     /// `[frequencyHz, midi, stableMidi, cents, clarity, rms,
-    ///   letter, accidental, octave, degree (0 = out of key), inKey (0/1), staffStep]`.
+    ///   letter, accidental, octave, degree (0 = out of key), inKey (0/1), staffStep,
+    ///   centerMidi, centerCents]`.
+    /// `midi`/`cents` are per frame (they follow the vibrato); `centerMidi`/
+    /// `centerCents` are the vibrato center (about 300 ms average of the current
+    /// note), which accuracy is judged by. Both cents are relative to `stableMidi`.
     /// Returns false (leaving `out` untouched) while silent or unpitched.
     pub fn process(&mut self, frame: &[f32], out: &mut [f64]) -> bool {
         if out.len() < FRAME_FIELDS {
@@ -131,6 +139,8 @@ impl Analyzer {
         out[9] = degree.map_or(0.0, f64::from);
         out[10] = if degree.is_some() { 1.0 } else { 0.0 };
         out[11] = self.clef.staff_step(&note) as f64;
+        out[12] = pitch.center_midi as f64;
+        out[13] = pitch.center_cents as f64;
         true
     }
 

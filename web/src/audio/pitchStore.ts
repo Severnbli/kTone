@@ -22,8 +22,11 @@ type FrameListener = (frame: PitchFrame | null) => void;
 /** Fixed-size history ring used by the pitch curve. NaN marks unpitched frames. */
 export class PitchHistory {
   readonly time = new Float64Array(HISTORY_CAPACITY);
+  /** Raw per-frame pitch: the curve draws this so vibrato stays visible. */
   readonly midi = new Float32Array(HISTORY_CAPACITY);
   readonly stable = new Float32Array(HISTORY_CAPACITY);
+  /** Vibrato-center deviation in cents: the curve colors segments by this. */
+  readonly centerCents = new Float32Array(HISTORY_CAPACITY);
   /** Index of the next write. */
   head = 0;
   size = 0;
@@ -32,6 +35,7 @@ export class PitchHistory {
     this.time[this.head] = timeMs;
     this.midi[this.head] = frame ? frame.midi : NaN;
     this.stable[this.head] = frame ? frame.stableMidi : NaN;
+    this.centerCents[this.head] = frame ? frame.centerCents : NaN;
     this.head = (this.head + 1) % HISTORY_CAPACITY;
     if (this.size < HISTORY_CAPACITY) this.size++;
   }

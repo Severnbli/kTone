@@ -39,6 +39,16 @@ describe('PitchStore', () => {
     expect(Number.isNaN(h.midi[h.at(h.size - 1)])).toBe(true);
   });
 
+  it('records the vibrato center next to the raw pitch', () => {
+    const store = new PitchStore();
+    store.push(frame(60, 40, { centerCents: 2 }), 0);
+    store.push(null, 10);
+    const h = store.history;
+    expect(h.midi[h.at(0)]).toBeCloseTo(60.4);
+    expect(h.centerCents[h.at(0)]).toBeCloseTo(2);
+    expect(Number.isNaN(h.centerCents[h.at(1)])).toBe(true);
+  });
+
   it('reset clears note and history', () => {
     const store = new PitchStore();
     store.push(frame(69), 0);

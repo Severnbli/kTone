@@ -78,7 +78,7 @@ New features and bug fixes come with tests. A bug fix starts with a failing test
 - `main` – stable releases only. Updated only by PR from `dev`.
 - `dev` – integration branch. Updated only by PR from feature branches.
 - Feature branches: `feat/<short-name>`, `fix/<short-name>`, `chore/<short-name>`, branched from `dev`.
-- Every PR targets `dev` (except release PRs `dev` → `main`) and needs a review from the other human on the team before merging.
+- Every PR targets `dev` (except release PRs `dev` → `main`). Approval is not required to merge, but asking the other human on the team for a review is encouraged.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat(core): add MPM pitch detector`.
 - Commit early and often: small, focused commits, each one building and passing tests.
 

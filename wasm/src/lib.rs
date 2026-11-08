@@ -93,14 +93,7 @@ impl Analyzer {
     /// Letters are indexed C=0 .. B=6, modes major=0 / minor=1,
     /// clefs treble=0, treble8vb=1, bass=2, alto=3, tenor=4.
     /// Returns false (and keeps the previous key) if the key is not supported.
-    pub fn configure(
-        &mut self,
-        tonic: u8,
-        accidental: i8,
-        mode: u8,
-        clef: u8,
-        a4_hz: f32,
-    ) -> bool {
+    pub fn configure(&mut self, tonic: u8, accidental: i8, mode: u8, clef: u8, a4_hz: f32) -> bool {
         self.clef = clef_from_index(clef);
         if a4_hz.is_finite() && a4_hz > 0.0 && (a4_hz - self.a4_hz).abs() > f32::EPSILON {
             self.a4_hz = a4_hz;
@@ -144,7 +137,11 @@ impl Analyzer {
     /// Spells `midi` in the configured key: `[letter, accidental, octave]`.
     pub fn spell(&self, midi: i32) -> Vec<i32> {
         let note = self.key.spell(midi);
-        vec![letter_index(note.letter) as i32, note.accidental as i32, note.octave]
+        vec![
+            letter_index(note.letter) as i32,
+            note.accidental as i32,
+            note.octave,
+        ]
     }
 
     /// Clears smoothing history.

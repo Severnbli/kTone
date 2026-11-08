@@ -43,9 +43,12 @@ export class Drone {
     fundamental.connect(master);
     upper.connect(upperGain).connect(lowpass).connect(master);
 
+    // Set the pitch directly: a ramp would glide up from the 440 Hz default,
+    // and the mic would hear (and show) the glide.
+    fundamental.frequency.value = frequencyHz;
+    upper.frequency.value = frequencyHz * 2;
     this.master = master;
     this.oscs = [fundamental, upper];
-    this.setFrequency(frequencyHz);
     this.oscs.forEach((o) => o.start(t));
   }
 

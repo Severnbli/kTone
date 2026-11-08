@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { frame } from '../test/frames';
-import { HISTORY_CAPACITY, PitchStore, SILENCE_HOLD_MS } from './pitchStore';
+import {
+  DRONE_LEAK_GAP_MS,
+  DRONE_LEAK_SHOW_MS,
+  HISTORY_CAPACITY,
+  PitchStore,
+  SILENCE_HOLD_MS,
+} from './pitchStore';
 
 describe('PitchStore', () => {
   it('notifies note listeners only when the note changes', () => {
@@ -67,5 +73,51 @@ describe('PitchStore', () => {
     off();
     store.push(frame(69), 0);
     expect(l).not.toHaveBeenCalled();
+  });
+
+  describe('drone leak', () => {
+    /** Pushes unpitched frames every 10 ms from `from` to `to` (exclusive). */
+    const leak = (store: PitchStore, from: number, to: number, droneLeak = true) => {
+      for (let t = from; t < to; t += 10) store.push(null, t, droneLeak);
+    };
+
+    it('is reported after the mic has heard the drone for a while', () => {
+      const store = new PitchStore();
+      const l = vi.fn();
+      store.subscribeDroneLeak(l);
+      leak(store, 0, DRONE_LEAK_SHOW_MS);
+      expect(store.getDroneLeak()).toBe(false);
+      leak(store, DRONE_LEAK_SHOW_MS, DRONE_LEAK_SHOW_MS + 20);
+      expect(store.getDroneLeak()).toBe(true);
+      expect(l).toHaveBeenCalledOnce();
+    });
+
+    it('survives short gaps and clears when the leak stops', () => {
+      const store = new PitchStore();
+      leak(store, 0, 1000);
+      leak(store, 1000, 1000 + DRONE_LEAK_GAP_MS - 50, false); // e.g. a short sung note
+      leak(store, 1450, 2000);
+      expect(store.getDroneLeak()).toBe(true);
+      // Singing: pitched frames, no leak.
+      const lastLeak = 1990;
+      for (let t = 2000; t <= lastLeak + DRONE_LEAK_GAP_MS; t += 10)
+        store.push(frame(62), t, false);
+      expect(store.getDroneLeak()).toBe(true);
+      store.push(frame(62), lastLeak + DRONE_LEAK_GAP_MS + 10, false);
+      expect(store.getDroneLeak()).toBe(false);
+      // A new run has to last long enough again.
+      leak(store, 3000, 3000 + DRONE_LEAK_SHOW_MS);
+      expect(store.getDroneLeak()).toBe(false);
+    });
+
+    it('is cleared by reset', () => {
+      const store = new PitchStore();
+      leak(store, 0, DRONE_LEAK_SHOW_MS + 100);
+      expect(store.getDroneLeak()).toBe(true);
+      store.reset();
+      expect(store.getDroneLeak()).toBe(false);
+      leak(store, 5000, 5100);
+      expect(store.getDroneLeak()).toBe(false);
+    });
   });
 });

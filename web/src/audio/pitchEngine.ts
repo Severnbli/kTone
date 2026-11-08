@@ -18,6 +18,7 @@ export class PitchEngine {
   private analyzer: Analyzer | null = null;
   private mic: MicSession | null = null;
   private settings: AnalyzerSettings | null = null;
+  private drone: { hz: number | null; filter: boolean } = { hz: null, filter: true };
   private generation = 0;
 
   constructor(
@@ -53,11 +54,13 @@ export class PitchEngine {
       return;
     }
     analyzer.configure(this.settings);
+    analyzer.setDrone(this.drone.hz, this.drone.filter);
     this.analyzer = analyzer;
     this.mic = mic;
     this.store.reset();
     scheduler = new FrameScheduler(analyzer.frameSize, analyzer.hopSize, (frame) => {
-      this.store.push(analyzer.process(frame), this.deps.now());
+      const pitch = analyzer.process(frame);
+      this.store.push(pitch, this.deps.now(), analyzer.droneLeak);
     });
   }
 
@@ -65,6 +68,15 @@ export class PitchEngine {
   configure(settings: AnalyzerSettings): void {
     this.settings = settings;
     this.analyzer?.configure(settings);
+  }
+
+  /**
+   * The drone the app plays (`null`: none) and whether to filter it out of
+   * detection. Safe to call at any time; keeps the analyzer state.
+   */
+  setDrone(hz: number | null, filter: boolean): void {
+    this.drone = { hz, filter };
+    this.analyzer?.setDrone(hz, filter);
   }
 
   async stop(): Promise<void> {

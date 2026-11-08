@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockAnalyzer } from '../engine/mock';
-import type { AnalyzerSettings } from '../engine/types';
+import type { Analyzer, AnalyzerSettings } from '../engine/types';
 import { MicError, classifyMicError } from './mic';
 import { PitchEngine } from './pitchEngine';
 import { PitchStore } from './pitchStore';
@@ -54,6 +54,44 @@ describe('PitchEngine', () => {
     expect(mic.stop).toHaveBeenCalled();
     expect(engine.running).toBe(false);
     expect(store.getNote()).toBeNull();
+  });
+
+  it('passes the drone to the analyzer and its leak flag to the store', async () => {
+    const mic = fakeMic();
+    const store = new PitchStore();
+    const push = vi.spyOn(store, 'push');
+    let analyzer: Analyzer | null = null;
+    let t = 0;
+    const engine = new PitchEngine(store, {
+      factory: async (sr) => (analyzer = await createMockAnalyzer(sr)),
+      startMic: mic.startMic,
+      now: () => (t += 10),
+    });
+    // Set before start: applied when the analyzer is created.
+    engine.setDrone(440, true);
+    await engine.start(settings);
+    const setDrone = vi.spyOn(analyzer!, 'setDrone');
+    mic.feedSine(440, 2048 + 512);
+    expect(push).toHaveBeenLastCalledWith(null, expect.any(Number), true);
+    expect(store.getNote()).toBeNull();
+
+    engine.setDrone(440, false);
+    expect(setDrone).toHaveBeenLastCalledWith(440, false);
+    mic.feedSine(440, 512);
+    expect(push).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stableMidi: 69 }),
+      expect.any(Number),
+      true,
+    );
+
+    engine.setDrone(null, true);
+    mic.feedSine(440, 512);
+    expect(push).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stableMidi: 69 }),
+      expect.any(Number),
+      false,
+    );
+    await engine.stop();
   });
 
   it('propagates mic errors and stays stopped', async () => {

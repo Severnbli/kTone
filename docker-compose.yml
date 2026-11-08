@@ -23,6 +23,27 @@ services:
       - cargo-registry:/usr/local/cargo/registry
       - pnpm-store:/home/node/.local/share/pnpm/store
 
+  # End-to-end tests: Playwright + Chromium with a fake microphone, run against
+  # `vite preview`. Runs as uid 1000 (like the dev image's `node` user) and
+  # shares its pnpm store so web/node_modules stays consistent.
+  #   docker compose run --rm e2e
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.49.1-jammy
+    user: "1000:1000"
+    working_dir: /work/web
+    environment:
+      CI: "1"
+      npm_config_store_dir: /home/node/.local/share/pnpm/store
+    command: >
+      sh -c "npm i -g --prefix /tmp/npm-global pnpm@9.15.0 &&
+             export PATH=/tmp/npm-global/bin:$$PATH &&
+             pnpm install --frozen-lockfile &&
+             pnpm e2e"
+    volumes:
+      - .:/work
+      - pnpm-store:/home/node/.local/share/pnpm/store
+    profiles: ["tools"]
+
 volumes:
   cargo-registry:
   pnpm-store:

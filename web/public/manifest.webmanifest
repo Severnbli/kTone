@@ -1,0 +1,16 @@
+{
+  "name": "kTone – умный тюнер для вокалистов",
+  "short_name": "kTone",
+  "description": "Определение высоты голоса в реальном времени: нота, центы, тональность, нотный стан.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111318",
+  "theme_color": "#111318",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

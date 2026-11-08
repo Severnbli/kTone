@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createAnalyzer } from './engine';
 import type { AnalyzerFactory } from './engine/types';
-import { MicError, startMic as realStartMic, type MicErrorCode } from './audio/mic';
-import { PitchEngine } from './audio/pitchEngine';
+import { documentVisibility, type PageVisibility } from './audio/lifecycle';
+import { MicError, startMic as realStartMic, type MicErrorCode, type StartMic } from './audio/mic';
+import { PitchEngine, type EngineState } from './audio/pitchEngine';
 import { PitchStore } from './audio/pitchStore';
+import { browserWakeLock, ScreenWakeLock, type WakeLockApi } from './audio/wakeLock';
 import { CentsGauge } from './components/CentsGauge';
 import { DroneControls } from './components/DroneControls';
 import { NoteDisplay } from './components/NoteDisplay';
@@ -17,7 +19,15 @@ import { keyLabel } from './music/naming';
 import { keySignature } from './music/theory';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-type Status = 'idle' | 'starting' | 'running' | MicErrorCode | 'engine';
+type Status =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'suspended'
+  | 'ended'
+  | 'background'
+  | MicErrorCode
+  | 'engine';
 
 const ERROR_TEXT: Partial<Record<Status, keyof Strings>> = {
   denied: 'micDenied',
@@ -25,13 +35,29 @@ const ERROR_TEXT: Partial<Record<Status, keyof Strings>> = {
   unsupported: 'micUnsupported',
   error: 'micError',
   engine: 'engineError',
+  ended: 'micEnded',
+  background: 'micBackground',
+  suspended: 'micPaused',
 };
+
+function statusOf(state: EngineState): Status {
+  if (state.status !== 'idle') return state.status;
+  return state.stopReason === 'ended' || state.stopReason === 'background'
+    ? state.stopReason
+    : 'idle';
+}
 
 export interface AppProps {
   factory?: AnalyzerFactory;
-  startMic?: typeof realStartMic;
+  startMic?: StartMic;
   initialSettings?: Settings;
+  /** Page visibility; defaults to `document`. */
+  visibility?: PageVisibility;
+  /** Screen Wake Lock API; defaults to `navigator.wakeLock`, `null` disables it. */
+  wakeLock?: WakeLockApi | null;
 }
+
+const defaultVisibility = documentVisibility();
 
 export default function App(props: AppProps) {
   const [settings, setSettings] = useState<Settings>(() => props.initialSettings ?? loadSettings());
@@ -49,14 +75,46 @@ export default function App(props: AppProps) {
 function Main({
   factory = createAnalyzer,
   startMic = realStartMic,
+  visibility = defaultVisibility,
+  wakeLock: wakeLockApi,
   settings,
   setSettings,
 }: AppProps & { settings: Settings; setSettings: (s: Settings) => void }) {
   const { t, lang } = useI18n();
   const store = useMemo(() => new PitchStore(), []);
   const engineRef = useRef<PitchEngine | null>(null);
-  engineRef.current ??= new PitchEngine(store, { factory, startMic, now: () => performance.now() });
+  engineRef.current ??= new PitchEngine(store, {
+    factory,
+    startMic,
+    now: () => performance.now(),
+    visibility,
+  });
   const [status, setStatus] = useState<Status>('idle');
+
+  // Engine-driven changes: interruptions, mic loss, background stop.
+  useEffect(() => {
+    const engine = engineRef.current;
+    return engine?.subscribe((state) => setStatus(statusOf(state)));
+  }, []);
+
+  const wakeLockRef = useRef<ScreenWakeLock | null>(null);
+  useEffect(() => {
+    const lock = new ScreenWakeLock(
+      wakeLockApi === undefined ? browserWakeLock() : wakeLockApi,
+      visibility,
+    );
+    wakeLockRef.current = lock;
+    return () => {
+      lock.dispose();
+      wakeLockRef.current = null;
+    };
+  }, [wakeLockApi, visibility]);
+  useEffect(() => {
+    wakeLockRef.current?.set('mic', status === 'running');
+  }, [status]);
+  const onDronePlaying = useCallback((playing: boolean) => {
+    wakeLockRef.current?.set('drone', playing);
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
 
   const { key, clef, a4Hz } = settings;
@@ -85,7 +143,18 @@ function Main({
     setStatus('starting');
     try {
       await engine.start(analyzerSettingsRef.current);
-      setStatus(engine.running ? 'running' : 'idle');
+      setStatus(statusOf(engine.state));
+    } catch (err) {
+      setStatus(err instanceof MicError ? err.code : 'engine');
+    }
+  }, []);
+
+  const resume = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    try {
+      await engine.resume();
+      setStatus(statusOf(engine.state));
     } catch (err) {
       setStatus(err instanceof MicError ? err.code : 'engine');
     }
@@ -94,6 +163,7 @@ function Main({
   const signature = keySignature(key);
   const errorKey = ERROR_TEXT[status];
   const running = status === 'running';
+  const active = running || status === 'suspended';
 
   return (
     <div className="app">
@@ -128,7 +198,7 @@ function Main({
             store={store}
             naming={settings.naming}
             degreeStyle={settings.degreeStyle}
-            hint={running ? t.silence : t.idle}
+            hint={status === 'suspended' ? t.micPaused : running ? t.silence : t.idle}
           />
           <CentsGauge store={store} zones={settings.zones} />
         </div>
@@ -144,13 +214,23 @@ function Main({
         <div className="controls">
           <button
             type="button"
-            className={running ? 'btn primary stop' : 'btn primary'}
+            className={active ? 'btn primary stop' : 'btn primary'}
             onClick={() => void toggle()}
             disabled={status === 'starting'}
             data-testid="start-stop"
           >
-            {status === 'starting' ? t.starting : running ? t.stop : t.start}
+            {status === 'starting' ? t.starting : active ? t.stop : t.start}
           </button>
+          {status === 'suspended' && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void resume()}
+              data-testid="resume"
+            >
+              {t.resume}
+            </button>
+          )}
           {errorKey && (
             <p className="error" role="alert">
               {t[errorKey]}
@@ -163,6 +243,8 @@ function Main({
             settings={settings}
             naming={settings.naming}
             onChange={(drone) => setSettings({ ...settings, drone })}
+            onPlayingChange={onDronePlaying}
+            visibility={visibility}
           />
         </div>
       </main>

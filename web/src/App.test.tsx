@@ -17,6 +17,7 @@ describe('App', () => {
     act(() => mic.feed(440, 2048));
     expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
     expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'green');
+    expect(screen.getByTestId('level-meter')).toHaveAttribute('data-level', '-9');
 
     fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
     fireEvent.change(screen.getByLabelText('Тональность'), { target: { value: 'F-major' } });

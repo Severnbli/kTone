@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createAnalyzer } from './engine';
 import type { AnalyzerFactory } from './engine/types';
+import { LevelStore } from './audio/level';
 import { documentVisibility, type PageVisibility } from './audio/lifecycle';
 import { MicError, startMic as realStartMic, type MicErrorCode, type StartMic } from './audio/mic';
 import { PitchEngine, type EngineState } from './audio/pitchEngine';
@@ -8,6 +9,7 @@ import { PitchStore } from './audio/pitchStore';
 import { browserWakeLock, ScreenWakeLock, type WakeLockApi } from './audio/wakeLock';
 import { CentsGauge } from './components/CentsGauge';
 import { DroneControls } from './components/DroneControls';
+import { LevelMeter } from './components/LevelMeter';
 import { NoteDisplay } from './components/NoteDisplay';
 import { PitchCurve } from './components/PitchCurve';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -82,12 +84,14 @@ function Main({
 }: AppProps & { settings: Settings; setSettings: (s: Settings) => void }) {
   const { t, lang } = useI18n();
   const store = useMemo(() => new PitchStore(), []);
+  const levels = useMemo(() => new LevelStore(), []);
   const engineRef = useRef<PitchEngine | null>(null);
   engineRef.current ??= new PitchEngine(store, {
     factory,
     startMic,
     now: () => performance.now(),
     visibility,
+    levels,
   });
   const [status, setStatus] = useState<Status>('idle');
 
@@ -201,6 +205,7 @@ function Main({
             hint={status === 'suspended' ? t.micPaused : running ? t.silence : t.idle}
           />
           <CentsGauge store={store} zones={settings.zones} />
+          <LevelMeter levels={levels} />
         </div>
 
         <div className="card staff-card">

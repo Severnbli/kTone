@@ -1,7 +1,8 @@
 // Soft drone on the tonic: a sine plus a quiet low-passed triangle an octave
 // up, with slow attack/release. Uses its own AudioContext so it works without
 // the microphone. The mic is captured with echo cancellation off, so the drone
-// can leak into detection through speakers; the UI recommends headphones.
+// can leak into detection through speakers: the drone filter (PitchTracker::set_drone)
+// ignores it and the UI hints at headphones when the mic keeps hearing it.
 
 const ATTACK_S = 0.4;
 const RELEASE_S = 0.3;

@@ -27,6 +27,8 @@ interface WasmAnalyzer {
   configure(tonic: number, accidental: number, mode: number, clef: number, a4Hz: number): boolean;
   process(frame: Float32Array, out: Float64Array): boolean;
   spell(midi: number): Int32Array;
+  setDrone(hz: number, filter: boolean): void;
+  readonly droneLeak: boolean;
   reset(): void;
   free(): void;
 }
@@ -110,6 +112,12 @@ export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
         centerMidi: out[12],
         centerCents: out[13],
       };
+    },
+    setDrone(hz, filter) {
+      inner.setDrone(hz ?? 0, filter);
+    },
+    get droneLeak() {
+      return inner.droneLeak;
     },
     keys: () => keys.map((k) => ({ ...k })),
     signature: (key) => mod.keySignature(letterIndex(key.tonic), key.accidental, modeIndex(key)),

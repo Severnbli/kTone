@@ -62,6 +62,16 @@ export interface Analyzer {
   configure(settings: AnalyzerSettings): void;
   /** `frame.length` must equal `frameSize`. Returns null while silent/unpitched. */
   process(frame: Float32Array): PitchFrame | null;
+  /**
+   * Tell the analyzer which drone the app is playing (`null`, 0 or a
+   * non-finite value: none). With `filter`, frames that look like the drone
+   * leaking from the speakers into the microphone are treated as unpitched
+   * (`process` returns null); either way `droneLeak` reports them. Keeps all
+   * other state, so call it on every drone, pitch or A4 change.
+   */
+  setDrone(hz: number | null, filter: boolean): void;
+  /** True when the last `process` call heard the drone leaking into the microphone. */
+  readonly droneLeak: boolean;
   /** All 30 supported keys (15 major, 15 minor). */
   keys(): KeySpec[];
   /** Sharps (positive) or flats (negative) in the key signature. */

@@ -1,0 +1,8 @@
+[package]
+name = "ktone-core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-agnostic audio core for kTone: pitch detection and music theory"
+license = "GPL-3.0-or-later"
+
+[dependencies]

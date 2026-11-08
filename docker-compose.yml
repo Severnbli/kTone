@@ -1,0 +1,67 @@
+services:
+  # One-off toolchain container: docker compose run --rm dev cargo test
+  dev:
+    build:
+      context: .
+      target: dev
+    image: ktone-dev:latest
+    working_dir: /work
+    environment:
+      npm_config_store_dir: /home/node/.local/share/pnpm/store
+    volumes:
+      - .:/work
+      - cargo-registry:/usr/local/cargo/registry
+      - pnpm-store:/home/node/.local/share/pnpm/store
+    profiles: ["tools"]
+
+  # Prototype: builds the WASM core and serves the web app on http://localhost:5173
+  web:
+    build:
+      context: .
+      target: dev
+    image: ktone-dev:latest
+    working_dir: /work
+    environment:
+      npm_config_store_dir: /home/node/.local/share/pnpm/store
+    command: sh -c "pnpm -C web install --frozen-lockfile && pnpm -C web wasm && pnpm -C web dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/work
+      - cargo-registry:/usr/local/cargo/registry
+      - pnpm-store:/home/node/.local/share/pnpm/store
+
+  # Production image (nginx + static build): docker compose --profile prod up app
+  app:
+    build:
+      context: .
+      target: runtime
+    image: severnbli/ktone:local
+    ports:
+      - "8080:80"
+    profiles: ["prod"]
+
+  # End-to-end tests: Playwright + Chromium with a fake microphone, run against
+  # `vite preview`. Runs as uid 1000 (like the dev image's `node` user) and
+  # shares its pnpm store so web/node_modules stays consistent.
+  #   docker compose run --rm e2e
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.49.1-jammy
+    user: "1000:1000"
+    working_dir: /work/web
+    environment:
+      CI: "1"
+      npm_config_store_dir: /home/node/.local/share/pnpm/store
+    command: >
+      sh -c "npm i -g --prefix /tmp/npm-global pnpm@9.15.0 &&
+             export PATH=/tmp/npm-global/bin:$$PATH &&
+             pnpm install --frozen-lockfile &&
+             pnpm e2e"
+    volumes:
+      - .:/work
+      - pnpm-store:/home/node/.local/share/pnpm/store
+    profiles: ["tools"]
+
+volumes:
+  cargo-registry:
+  pnpm-store:

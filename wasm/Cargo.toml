@@ -1,0 +1,14 @@
+[package]
+name = "ktone-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly bindings for the kTone core"
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ktone-core = { path = "../core" }
+# Must match the wasm-bindgen CLI version in the Dockerfile and CI.
+wasm-bindgen = "=0.2.100"

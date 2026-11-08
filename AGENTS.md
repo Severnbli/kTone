@@ -27,19 +27,42 @@ Later: exercises (echo, scales, intervals, sight-singing, MIDI/MusicXML import),
 - **Audio core:** Rust, compiled to WASM for the web. Keep it platform-agnostic so it can later be reused in native apps (e.g. Flutter via flutter_rust_bridge).
 - **UI:** TypeScript + React, audio via Web Audio API and `AudioWorklet`.
 
-### Planned layout
+### Layout
 
 ```
-core/   Rust crate: pitch detection, smoothing, note/key/clef theory
-web/    React + TypeScript PWA, WASM bindings, AudioWorklet
-docs/   design notes and decision log
+core/     Rust crate: pitch detection (MPM), smoothing, music theory
+wasm/     wasm-bindgen bindings for the core (numeric, allocation-light API)
+web/      React + TypeScript PWA; src/engine/ wraps the WASM build, mock.ts is the TS fallback
+scripts/  build-wasm.sh, make-icons.py
+assets/   brand sources (logo, banner)
+deploy/   nginx config for the production image
+docs/     decision log
 ```
-
-Update this section and the commands below when the scaffolding lands.
 
 ### Commands
 
-To be filled in once the project is scaffolded (dev, build, test, lint for both `core/` and `web/`). Agents must run the relevant test and lint commands before every commit.
+Everything runs in Docker; nothing but Docker is needed on the host.
+
+```sh
+docker compose up web                                  # dev server, http://localhost:5173
+docker compose run --rm dev cargo fmt --all            # format Rust
+docker compose run --rm dev cargo clippy --workspace --all-targets -- -D warnings
+docker compose run --rm dev cargo test --workspace
+docker compose run --rm dev pnpm -C web wasm           # build core to web/src/wasm-pkg
+docker compose run --rm dev pnpm -C web lint           # ESLint + Prettier check
+docker compose run --rm dev pnpm -C web format
+docker compose run --rm dev pnpm -C web test           # Vitest (unit + component)
+docker compose run --rm dev pnpm -C web build
+docker compose run --rm e2e                            # Playwright, fake microphone
+docker compose --profile prod up app                   # production image, http://localhost:8080
+python3 scripts/make-icons.py                          # regenerate icons from assets/brand
+```
+
+Before every commit run the checks for the parts you touched: Rust fmt + clippy + tests, and web lint + test + build. Run e2e when UI or engine behavior changes. CI runs all of them on every push and PR to `main` and `dev`.
+
+### CI/CD
+
+`.github/workflows/ci.yml`: Rust checks, web checks (incl. e2e with the real WASM engine), then on push only, the production image is pushed to Docker Hub as `severnbli/ktone` – `dev` from the dev branch, `latest` from main, plus `<branch>-<sha>` tags. Secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
 
 ## Audio and DSP requirements
 

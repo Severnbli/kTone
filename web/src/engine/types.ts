@@ -1,0 +1,67 @@
+// CONTRACT between the UI and the audio engine (Rust core compiled to WASM).
+// The WASM bindings in `wasm/` implement `Analyzer`; `mock.ts` implements it in
+// pure TS for tests. Do not change without updating both sides.
+
+export type Letter = 'C' | 'D' | 'E' | 'F' | 'G' | 'A' | 'B';
+export type Mode = 'major' | 'minor';
+export type ClefId = 'treble' | 'treble8vb' | 'bass' | 'alto' | 'tenor';
+
+export interface KeySpec {
+  tonic: Letter;
+  /** -1 flat, 0 natural, 1 sharp */
+  accidental: number;
+  mode: Mode;
+}
+
+export interface SpelledNote {
+  letter: Letter;
+  /** -2..2: double flat .. double sharp */
+  accidental: number;
+  /** Scientific octave of the letter (C4 = middle C). */
+  octave: number;
+}
+
+export interface AnalyzerSettings {
+  key: KeySpec;
+  clef: ClefId;
+  /** Reference pitch, default 440. */
+  a4Hz: number;
+}
+
+export interface PitchFrame {
+  frequencyHz: number;
+  /** Fractional MIDI number (69 = A4 at the configured reference). */
+  midi: number;
+  /** Note to display; changes only past the hysteresis band. */
+  stableMidi: number;
+  /** Deviation of `midi` from `stableMidi` in cents. */
+  cents: number;
+  clarity: number;
+  rms: number;
+  /** `stableMidi` spelled in the configured key. */
+  note: SpelledNote;
+  /** Scale degree 1..7, or null when the note is out of key. */
+  degree: number | null;
+  inKey: boolean;
+  /** Staff position for the configured clef: 0 = bottom line, 8 = top line. */
+  staffStep: number;
+}
+
+export interface Analyzer {
+  /** Samples per `process` call. */
+  readonly frameSize: number;
+  /** Recommended number of new samples between consecutive frames. */
+  readonly hopSize: number;
+  configure(settings: AnalyzerSettings): void;
+  /** `frame.length` must equal `frameSize`. Returns null while silent/unpitched. */
+  process(frame: Float32Array): PitchFrame | null;
+  /** All 30 supported keys (15 major, 15 minor). */
+  keys(): KeySpec[];
+  /** Sharps (positive) or flats (negative) in the key signature. */
+  signature(key: KeySpec): number;
+  /** Spell an arbitrary MIDI note in the configured key (for target notes, drone label, etc.). */
+  spell(midi: number): SpelledNote;
+  dispose(): void;
+}
+
+export type AnalyzerFactory = (sampleRate: number) => Promise<Analyzer>;

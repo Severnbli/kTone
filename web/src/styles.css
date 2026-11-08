@@ -73,9 +73,15 @@ body {
 
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.brand-logo {
+  flex: none;
+  width: 32px;
+  height: 32px;
 }
 
 .brand h1 {

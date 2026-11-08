@@ -99,6 +99,7 @@ function Main({
     <div className="app">
       <header className="app-header">
         <div className="brand">
+          <img className="brand-logo" src="/icons/icon-192.png" alt="" width="32" height="32" />
           <h1>{t.appTitle}</h1>
           <span className="key-badge" data-testid="key-badge">
             {keyLabel(key, lang)}

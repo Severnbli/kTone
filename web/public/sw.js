@@ -2,8 +2,15 @@
 // navigations, stale-while-revalidate for same-origin assets.
 'use strict';
 
-const CACHE = 'ktone-v1';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/pitch-worklet.js'];
+const CACHE = 'ktone-v2';
+const SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/favicon-32.png',
+  '/pitch-worklet.js',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

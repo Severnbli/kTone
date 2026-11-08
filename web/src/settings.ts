@@ -19,6 +19,8 @@ export interface Settings {
   degreeStyle: DegreeStyle;
   zones: ZoneThresholds;
   drone: { volume: number; octave: number };
+  /** Do not show the drone leaking from the speakers into the mic as a sung note. */
+  droneFilter: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   degreeStyle: 'roman',
   zones: { green: 10, yellow: 25 },
   drone: { volume: 0.3, octave: 3 },
+  droneFilter: true,
 };
 
 export const STORAGE_KEY = 'ktone.settings.v1';
@@ -64,6 +67,7 @@ export function sanitizeSettings(raw: unknown): Settings {
         ? (droneRaw.octave as number)
         : d.drone.octave,
     },
+    droneFilter: typeof r.droneFilter === 'boolean' ? r.droneFilter : d.droneFilter,
   };
 }
 

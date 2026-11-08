@@ -85,6 +85,17 @@ describe('SettingsPanel', () => {
     expect(last().zones).toEqual({ green: 30, yellow: 40 });
   });
 
+  it('toggles the drone filter', () => {
+    const { last } = setup();
+    const box = screen.getByLabelText('Не принимать бурдон за голос');
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(last().droneFilter).toBe(false);
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(last().droneFilter).toBe(true);
+  });
+
   it('switches the UI language', () => {
     const { last } = setup();
     fireEvent.change(screen.getByLabelText('Язык'), { target: { value: 'en' } });

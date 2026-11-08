@@ -409,7 +409,8 @@ fieldset.field {
   grid-column: 1 / -1;
 }
 
-.radio {
+.radio,
+.check {
   display: flex;
   align-items: center;
   gap: 8px;

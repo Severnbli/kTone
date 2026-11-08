@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { Drone, droneMidi } from '../audio/drone';
+import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { formatNote, type NoteNaming } from '../music/naming';
 import { LETTER_PC, midiToHz } from '../music/theory';
 import { DRONE_OCTAVES, type Settings } from '../settings';
+import { DroneLeakHint } from './DroneLeakHint';
 
 interface Props {
   settings: Settings;
   naming: NoteNaming;
   onChange: (drone: Settings['drone']) => void;
+  /** Called with the drone frequency while it plays, null when it stops. */
+  onPlayingChange?: (hz: number | null) => void;
+  /** Source of the drone leak hint. */
+  store?: PitchStore;
 }
 
-export function DroneControls({ settings, naming, onChange }: Props) {
+export function DroneControls({ settings, naming, onChange, onPlayingChange, store }: Props) {
   const { t, lang } = useI18n();
   const droneRef = useRef<Drone | null>(null);
   const [on, setOn] = useState(false);
@@ -27,6 +33,9 @@ export function DroneControls({ settings, naming, onChange }: Props) {
   useEffect(() => {
     if (on) droneRef.current?.setVolume(volume);
   }, [on, volume]);
+  useEffect(() => {
+    onPlayingChange?.(on ? hz : null);
+  }, [on, hz, onPlayingChange]);
   useEffect(
     () => () => {
       void droneRef.current?.dispose();
@@ -91,6 +100,7 @@ export function DroneControls({ settings, naming, onChange }: Props) {
         </label>
       </div>
       <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
+      {on && store && <DroneLeakHint store={store} />}
     </section>
   );
 }

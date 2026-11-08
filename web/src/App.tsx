@@ -67,6 +67,11 @@ function Main({
     engineRef.current?.configure(analyzerSettings);
   }, [analyzerSettings]);
 
+  const [droneHz, setDroneHz] = useState<number | null>(null);
+  useEffect(() => {
+    engineRef.current?.setDrone(droneHz, settings.droneFilter);
+  }, [droneHz, settings.droneFilter]);
+
   useEffect(() => {
     const engine = engineRef.current;
     return () => {
@@ -163,6 +168,8 @@ function Main({
             settings={settings}
             naming={settings.naming}
             onChange={(drone) => setSettings({ ...settings, drone })}
+            onPlayingChange={setDroneHz}
+            store={store}
           />
         </div>
       </main>

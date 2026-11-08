@@ -47,6 +47,23 @@ describe('App', () => {
     expect(screen.getByTestId('note-name')).toHaveTextContent('–');
   });
 
+  it('ignores the drone in the mic unless the filter is off', async () => {
+    const mic = fakeMic();
+    render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+    await screen.findByRole('button', { name: 'Стоп' });
+    // jsdom has no AudioContext, so the drone is silent, but the app treats it as playing.
+    fireEvent.click(screen.getByRole('button', { name: /Бурдон/ }));
+    const c3 = 440 * 2 ** (-21 / 12);
+    act(() => mic.feed(c3, 4096));
+    expect(screen.getByTestId('note-name')).toHaveTextContent('–');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
+    fireEvent.click(screen.getByLabelText('Не принимать бурдон за голос'));
+    act(() => mic.feed(c3, 2048));
+    expect(screen.getByTestId('note-name')).toHaveTextContent('до');
+  });
+
   it('reports a denied microphone', async () => {
     render(
       <App

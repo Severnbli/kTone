@@ -21,3 +21,16 @@
 ## 2026-11-08 – Engine loading
 
 - **Decision:** the web app loads the WASM package through `import.meta.glob`, so builds and unit tests work without Rust; when the package is missing or fails to load, the TS mock engine is used. Analysis runs on the main thread; the AudioWorklet only captures audio.
+
+## 2026-11-08 – Mobile lifecycle: wake lock and audio interruptions
+
+- **Decision:** the app reacts to phone-style interruptions with a few simple rules, implemented in `web/src/audio/lifecycle.ts`, `mic.ts`, `pitchEngine.ts`, `wakeLock.ts` and `DroneControls.tsx`:
+  - **Screen Wake Lock** is held while the mic is running or the drone is playing, released otherwise, and re-requested when the page becomes visible again (the browser drops it when hidden). Missing API or refused requests are ignored.
+  - **Mic track ended** (device unplugged, permission revoked, mic taken by another app): the engine stops and the UI says the mic was disconnected; "Start" starts a fresh session.
+  - **Mic paused** (`AudioContext` `suspended` or Safari `interrupted`, or a muted track): the UI shows a "paused" state. While the page is visible the engine makes one automatic `resume()` attempt (immediately, or when the page becomes visible). If that fails, a "Resume" button appears; it is a user gesture, so it resumes the context, or restarts the mic if resuming the old session is not possible.
+  - **Background:** after 60 s hidden the mic is stopped (freeing it for other apps) and the UI says so; coming back sooner changes nothing.
+  - **Drone:** its own context follows the same rules: one automatic resume while visible; if that fails, the drone turns off with a short message, and a tap restarts it; 60 s hidden stops it.
+  - `resume()` attempts are capped at 1 s, because iOS can leave the promise pending outside a user gesture.
+- **Why:** before this, the app silently stopped producing frames while the UI still said it was listening. Automatic recovery covers the common short interruptions; anything that needs a gesture gets an explicit button; long background stays do not hold the mic.
+- **Testability:** page visibility, the wake lock API, the mic starter and the drone's `AudioContext` are injected, and the track/context event mapping is a pure function (`watchMicState`), so all rules are covered by Vitest with fakes; e2e checks a real suspended context and an ended track in Chromium.
+- **Alternatives:** stopping the mic as soon as the page is hidden (loses the session on a quick app switch); never stopping in the background (keeps the mic indicator on and blocks other apps); auto-retrying resume in a loop (useless on iOS without a gesture, wastes battery).

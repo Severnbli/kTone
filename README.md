@@ -4,6 +4,8 @@
 
 <p align="center"><b>A smart pitch detector for people learning to sing.</b></p>
 
+<p align="center"><a href="https://ktone.severnbli.dev"><b>Try it at ktone.severnbli.dev</b></a></p>
+
 kTone listens to your voice and shows in real time which note you are singing, how many cents you are off, and whether you hit the target. Unlike a plain tuner it understands music notation: notes are spelled according to the selected key (F♯ in D major, G♭ in D♭ major), shown as scale degrees, and drawn on a staff in the selected clef.
 
 ## Features (MVP)
@@ -15,7 +17,38 @@ kTone listens to your voice and shows in real time which note you are singing, h
 - Drone on the tonic
 - Solfège with Russian octave names or letter names (C4), configurable A4
 
-## Quick start
+## Self-hosting
+
+kTone is a static web app served by nginx on port 80 inside the container. Images on Docker Hub:
+
+- `severnbli/ktone:latest` – stable, built from `main`
+- `severnbli/ktone:dev` – the integration branch, updated on every merge
+- `severnbli/ktone:<branch>-<sha>` – a specific build
+
+### Docker Compose
+
+Save as `compose.yaml` and run `docker compose up -d`:
+
+```yaml
+services:
+  ktone:
+    image: severnbli/ktone:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+```
+
+Update to a newer image with `docker compose pull && docker compose up -d`.
+
+### docker run
+
+```sh
+docker run -d --name ktone --restart unless-stopped -p 8080:80 severnbli/ktone:latest
+```
+
+Either way the app is on http://localhost:8080. Browsers allow microphone access only on `localhost` or over HTTPS, so for any other host put it behind a reverse proxy with TLS (Caddy, Traefik, nginx) that forwards to port 8080.
+
+## Development
 
 Requires Docker with Compose.
 
@@ -37,8 +70,6 @@ scripts/  build helpers (WASM build, icon generation)
 assets/   brand sources
 docs/     decision log
 ```
-
-Docker images are published to Docker Hub as `severnbli/ktone` (`dev` and `latest` tags).
 
 ## Contributing
 

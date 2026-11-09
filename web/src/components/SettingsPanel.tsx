@@ -1,21 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { browserMediaDevices, type MediaDevicesLike } from '../audio/devices';
-import type { ClefId } from '../engine/types';
 import { useI18n } from '../i18n/context';
-import type { Strings } from '../i18n/strings';
-import { MAJOR_KEYS, MINOR_KEYS } from '../music/keys';
-import { keyLabel } from '../music/naming';
-import { keyId, parseKeyId } from '../music/theory';
-import { A4_MAX, A4_MIN, CLEFS, sanitizeSettings, type Settings } from '../settings';
+import type { Lang } from '../i18n/strings';
+import type { DegreeStyle, NoteNaming } from '../music/naming';
+import { A4_MAX, A4_MIN, sanitizeSettings, type Settings, type Theme } from '../settings';
+import { Segmented, Switch } from './controls';
+import { DroneFields } from './DroneFields';
 import { MicDeviceSelect } from './MicDeviceSelect';
-
-const CLEF_LABEL_KEY: Record<ClefId, keyof Strings> = {
-  treble: 'clefTreble',
-  treble8vb: 'clefTreble8vb',
-  bass: 'clefBass',
-  alto: 'clefAlto',
-  tenor: 'clefTenor',
-};
 
 interface Props {
   settings: Settings;
@@ -64,156 +55,122 @@ function NumberField({
   );
 }
 
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="settings-group">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Everything except key and clef (those are the header chips), grouped:
+ * sound, notation, accuracy, interface.
+ */
 export function SettingsPanel({ settings, onChange, mediaDevices = browserMediaDevices() }: Props) {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const update = (patch: Partial<Settings>) =>
     onChange(sanitizeSettings({ ...settings, ...patch }));
 
   return (
     <form className="settings" onSubmit={(e) => e.preventDefault()} data-testid="settings-panel">
-      <MicDeviceSelect
-        value={settings.micDeviceId}
-        onChange={(micDeviceId) => update({ micDeviceId })}
-        mediaDevices={mediaDevices}
-      />
-
-      <label className="field">
-        <span>{t.key}</span>
-        <select
-          aria-label={t.key}
-          value={keyId(settings.key)}
-          onChange={(e) => {
-            const key = parseKeyId(e.target.value);
-            if (key) update({ key });
-          }}
-        >
-          <optgroup label={t.major}>
-            {MAJOR_KEYS.map((k) => (
-              <option key={keyId(k)} value={keyId(k)}>
-                {keyLabel(k, lang)}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label={t.minor}>
-            {MINOR_KEYS.map((k) => (
-              <option key={keyId(k)} value={keyId(k)}>
-                {keyLabel(k, lang)}
-              </option>
-            ))}
-          </optgroup>
-        </select>
-      </label>
-
-      <label className="field">
-        <span>{t.clef}</span>
-        <select
-          aria-label={t.clef}
-          value={settings.clef}
-          onChange={(e) => update({ clef: e.target.value as ClefId })}
-        >
-          {CLEFS.map((c) => (
-            <option key={c} value={c}>
-              {t[CLEF_LABEL_KEY[c]]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <NumberField
-        id="a4"
-        label={t.a4}
-        value={settings.a4Hz}
-        min={A4_MIN}
-        max={A4_MAX}
-        onCommit={(a4Hz) => update({ a4Hz })}
-      />
-
-      <fieldset className="field">
-        <legend>{t.naming}</legend>
-        <label className="radio">
-          <input
-            type="radio"
-            name="naming"
-            checked={settings.naming === 'solfege'}
-            onChange={() => update({ naming: 'solfege' })}
-          />
-          {t.namingSolfege}
-        </label>
-        <label className="radio">
-          <input
-            type="radio"
-            name="naming"
-            checked={settings.naming === 'letter'}
-            onChange={() => update({ naming: 'letter' })}
-          />
-          {t.namingLetter}
-        </label>
-      </fieldset>
-
-      <fieldset className="field">
-        <legend>{t.degrees}</legend>
-        <label className="radio">
-          <input
-            type="radio"
-            name="degrees"
-            checked={settings.degreeStyle === 'roman'}
-            onChange={() => update({ degreeStyle: 'roman' })}
-          />
-          {t.degreesRoman}
-        </label>
-        <label className="radio">
-          <input
-            type="radio"
-            name="degrees"
-            checked={settings.degreeStyle === 'arabic'}
-            onChange={() => update({ degreeStyle: 'arabic' })}
-          />
-          {t.degreesArabic}
-        </label>
-      </fieldset>
-
-      <fieldset className="field zones">
-        <legend>{t.zones}</legend>
-        <NumberField
-          id="zone-green"
-          label={t.zoneGreen}
-          value={settings.zones.green}
-          min={1}
-          max={49}
-          onCommit={(green) =>
-            update({ zones: { green, yellow: Math.max(green, settings.zones.yellow) } })
-          }
+      <Group title={t.groupSound}>
+        <MicDeviceSelect
+          value={settings.micDeviceId}
+          onChange={(micDeviceId) => update({ micDeviceId })}
+          mediaDevices={mediaDevices}
         />
-        <NumberField
-          id="zone-yellow"
-          label={t.zoneYellow}
-          value={settings.zones.yellow}
-          min={settings.zones.green}
-          max={50}
-          onCommit={(yellow) => update({ zones: { ...settings.zones, yellow } })}
-        />
-      </fieldset>
-
-      <label className="check">
-        <input
-          type="checkbox"
+        <Switch
+          label={t.droneFilter}
           checked={settings.droneFilter}
-          onChange={(e) => update({ droneFilter: e.target.checked })}
+          onChange={(droneFilter) => update({ droneFilter })}
         />
-        {t.droneFilter}
-      </label>
+        <DroneFields
+          drone={settings.drone}
+          keySpec={settings.key}
+          naming={settings.naming}
+          onChange={(drone) => update({ drone })}
+          standalone
+        />
+      </Group>
 
-      <label className="field">
-        <span>{t.language}</span>
-        <select
-          aria-label={t.language}
+      <Group title={t.groupNotation}>
+        <Segmented<NoteNaming>
+          legend={t.naming}
+          value={settings.naming}
+          onChange={(naming) => update({ naming })}
+          options={[
+            { value: 'solfege', label: t.namingSolfege },
+            { value: 'letter', label: t.namingLetter },
+          ]}
+        />
+        <small className="field-note">{t.namingNote}</small>
+        <Segmented<DegreeStyle>
+          legend={t.degrees}
+          value={settings.degreeStyle}
+          onChange={(degreeStyle) => update({ degreeStyle })}
+          options={[
+            { value: 'roman', label: t.degreesRoman },
+            { value: 'arabic', label: t.degreesArabic },
+          ]}
+        />
+        <NumberField
+          id="a4"
+          label={t.a4}
+          value={settings.a4Hz}
+          min={A4_MIN}
+          max={A4_MAX}
+          onCommit={(a4Hz) => update({ a4Hz })}
+        />
+      </Group>
+
+      <Group title={t.groupAccuracy}>
+        <fieldset className="field zones">
+          <legend>{t.zones}</legend>
+          <NumberField
+            id="zone-green"
+            label={t.zoneGreen}
+            value={settings.zones.green}
+            min={1}
+            max={49}
+            onCommit={(green) =>
+              update({ zones: { green, yellow: Math.max(green, settings.zones.yellow) } })
+            }
+          />
+          <NumberField
+            id="zone-yellow"
+            label={t.zoneYellow}
+            value={settings.zones.yellow}
+            min={settings.zones.green}
+            max={50}
+            onCommit={(yellow) => update({ zones: { ...settings.zones, yellow } })}
+          />
+        </fieldset>
+      </Group>
+
+      <Group title={t.groupInterface}>
+        <Segmented<Lang>
+          legend={t.language}
           value={settings.lang}
-          onChange={(e) => update({ lang: e.target.value === 'en' ? 'en' : 'ru' })}
-        >
-          <option value="ru">Русский</option>
-          <option value="en">English</option>
-        </select>
-      </label>
+          onChange={(lang) => update({ lang })}
+          options={[
+            { value: 'ru', label: 'Русский' },
+            { value: 'en', label: 'English' },
+          ]}
+        />
+        <Segmented<Theme>
+          legend={t.theme}
+          value={settings.theme}
+          onChange={(theme) => update({ theme })}
+          testId="theme-setting"
+          options={[
+            { value: 'system', label: t.themeSystem },
+            { value: 'dark', label: t.themeDark },
+            { value: 'light', label: t.themeLight },
+          ]}
+        />
+      </Group>
     </form>
   );
 }

@@ -26,8 +26,9 @@ describe('App', () => {
     expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'green');
     expect(screen.getByTestId('level-meter')).toHaveAttribute('data-level', '-9');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
-    fireEvent.change(screen.getByLabelText('Тональность'), { target: { value: 'F-major' } });
+    fireEvent.click(screen.getByTestId('key-badge'));
+    fireEvent.click(screen.getByRole('button', { name: 'Фа мажор' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
     act(() => mic.feed(440 * Math.pow(2, 1 / 12), 2048));
     expect(screen.getByTestId('note-name')).toHaveTextContent('си♭');
     expect(screen.getByTestId('note-degree')).toHaveTextContent('IV');
@@ -46,7 +47,13 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
     await screen.findByRole('button', { name: 'Стоп' });
     // jsdom has no AudioContext, so the drone is silent, but the app treats it as playing.
-    fireEvent.click(screen.getByRole('button', { name: /Бурдон/ }));
+    fireEvent.click(screen.getByTestId('drone-open'));
+    fireEvent.click(screen.getByTestId('drone-toggle'));
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('drone-open')).toHaveAccessibleName(
+      'Бурдон · до малой октавы, звучит',
+    );
     const c3 = 440 * 2 ** (-21 / 12);
     act(() => mic.feed(c3, 4096));
     expect(screen.getByTestId('note-name')).toHaveTextContent('–');
@@ -119,6 +126,62 @@ describe('App', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Микрофон не найден');
+  });
+
+  it('changes the clef from the header chip', () => {
+    render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    const chip = screen.getByTestId('clef-chip');
+    expect(chip).toHaveAccessibleName('Ключ: скрипичный');
+    fireEvent.click(chip);
+    const dialog = screen.getByRole('dialog', { name: 'Ключ' });
+    expect(screen.getByRole('button', { name: 'скрипичный' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'басовый' }));
+    expect(dialog).not.toBeInTheDocument();
+    expect(screen.getByTestId('staff')).toHaveAttribute('data-clef', 'bass');
+    expect(chip).toHaveAccessibleName('Ключ: басовый');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).clef).toBe('bass');
+  });
+
+  it('opens settings in a sheet and gives the focus back on close', () => {
+    render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    const gear = screen.getByRole('button', { name: 'Настройки' });
+    gear.focus();
+    fireEvent.click(gear);
+    expect(gear).toHaveAttribute('aria-expanded', 'true');
+    const dialog = screen.getByRole('dialog', { name: 'Настройки' });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    for (const group of ['Звук', 'Нотация', 'Точность', 'Интерфейс']) {
+      expect(screen.getByRole('heading', { name: group })).toBeInTheDocument();
+    }
+    // The live readout stays mounted behind the sheet.
+    expect(screen.getByTestId('note-display')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(gear).toHaveFocus();
+  });
+
+  it('applies and saves the theme', () => {
+    render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
+    fireEvent.click(screen.getByLabelText('Светлая'));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).theme).toBe('light');
+    fireEvent.click(screen.getByLabelText('Как в системе'));
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it('has a bottom bar with the drone, a round Start button and a disabled target slot', () => {
+    render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    const bar = screen.getByRole('contentinfo');
+    expect(bar).toContainElement(screen.getByTestId('drone-open'));
+    expect(bar).toContainElement(screen.getByTestId('start-stop'));
+    expect(screen.getByTestId('start-stop')).toHaveTextContent('Начать');
+    expect(screen.getByTestId('target-slot')).toBeDisabled();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName('kTone');
   });
 
   it('renders in English from saved settings', async () => {

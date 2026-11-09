@@ -8,7 +8,7 @@ export function DroneLeakHint({ store }: { store: PitchStore }) {
   const leak = useSyncExternalStore(store.subscribeDroneLeak, store.getDroneLeak);
   if (!leak) return null;
   return (
-    <p className="warning active" role="status" data-testid="drone-leak-hint">
+    <p className="toast warning" role="status" data-testid="drone-leak-hint">
       {t.droneLeak}
     </p>
   );

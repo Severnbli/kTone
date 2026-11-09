@@ -68,6 +68,7 @@ describe('settings persistence', () => {
       zones: { green: 5, yellow: 15 },
       drone: { volume: 0.5, octave: 2 },
       lang: 'en',
+      theme: 'light',
       micDeviceId: 'usb-1',
     };
     expect(saveSettings(custom, s)).toBe(true);
@@ -111,6 +112,19 @@ describe('settings persistence', () => {
     const s = new MemoryStorage();
     saveSettings({ ...DEFAULT_SETTINGS, droneFilter: false }, s);
     expect(loadSettings(s).droneFilter).toBe(false);
+  });
+
+  it('follows the system theme by default and validates the saved theme', () => {
+    expect(DEFAULT_SETTINGS.theme).toBe('system');
+    expect(sanitizeSettings({ theme: 'dark' }).theme).toBe('dark');
+    expect(sanitizeSettings({ theme: 'light' }).theme).toBe('light');
+    expect(sanitizeSettings({ theme: 'neon' }).theme).toBe('system');
+    expect(sanitizeSettings({ theme: 1 }).theme).toBe('system');
+    // Settings saved before the theme existed.
+    expect(sanitizeSettings({ lang: 'en' }).theme).toBe('system');
+    const s = new MemoryStorage();
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' }, s);
+    expect(loadSettings(s).theme).toBe('dark');
   });
 
   it('keeps a string device id and drops anything else', () => {

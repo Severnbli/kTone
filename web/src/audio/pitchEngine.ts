@@ -120,7 +120,7 @@ export class PitchEngine {
         const result = analyzer.process(frame);
         if (debug) debug.record(this.deps.now() - now, frames.dropped);
         this.store.push(result, now, analyzer.droneLeak);
-        levels?.push(frame, result !== null, now);
+        levels?.push(frame, result !== null, now, analyzer.gate, analyzer.noiseFloor);
       },
     );
     scheduler = frames;

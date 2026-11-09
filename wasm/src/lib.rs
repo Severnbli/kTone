@@ -172,7 +172,21 @@ impl Analyzer {
         self.tracker.drone_leak()
     }
 
-    /// Clears smoothing history.
+    /// Estimated background noise floor (linear RMS), 0 while it is still
+    /// being measured. Updated on every `process` call, pitched or not.
+    #[wasm_bindgen(getter, js_name = noiseFloor)]
+    pub fn noise_floor(&self) -> f32 {
+        self.tracker.noise_floor().unwrap_or(0.0)
+    }
+
+    /// RMS gate (linear) a frame must reach to be analyzed: the noise floor
+    /// plus a margin, or the default gate until the floor is known.
+    #[wasm_bindgen(getter)]
+    pub fn gate(&self) -> f32 {
+        self.tracker.gate()
+    }
+
+    /// Clears smoothing history and the noise floor.
     pub fn reset(&mut self) {
         self.tracker.reset();
     }

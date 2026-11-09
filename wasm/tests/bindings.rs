@@ -171,3 +171,30 @@ fn drone_filter_ignores_the_drone_but_not_a_voice() {
         assert_eq!(count(&mut a, 220.0, &drone), (20, 0));
     }
 }
+
+#[test]
+fn reports_the_noise_floor_and_gate_on_unpitched_frames() {
+    let mut a = Analyzer::new(SR, FRAME, HOP);
+    assert_eq!(a.noise_floor(), 0.0);
+    assert!((a.gate() - 0.005).abs() < 1e-6);
+    // White-ish noise at about −50 dBFS RMS for one second.
+    let mut seed = 7u32;
+    let noise: Vec<f32> = (0..SR as usize)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            0.0110 * (seed as f32 / u32::MAX as f32 - 0.5)
+        })
+        .collect();
+    let mut out = vec![0.0; FRAME_FIELDS];
+    for frame in noise.windows(FRAME).step_by(HOP) {
+        assert!(!a.process(frame, &mut out));
+    }
+    let floor_db = 20.0 * a.noise_floor().log10();
+    let gate_db = 20.0 * a.gate().log10();
+    assert!((floor_db + 50.0).abs() < 3.0, "floor {floor_db}");
+    assert!((gate_db - floor_db - 11.0).abs() < 0.1, "gate {gate_db}");
+    a.reset();
+    assert_eq!(a.noise_floor(), 0.0);
+}

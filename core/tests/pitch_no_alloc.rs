@@ -1,4 +1,5 @@
-//! Verifies that `Mpm::detect` and `PitchTracker::process` never allocate.
+//! Verifies that `Mpm::detect` and `PitchTracker::process` (including the
+//! noise floor and the automatic gate) never allocate.
 //! Uses a counting global allocator, so it lives in its own test binary.
 
 use ktone_core::pitch::{Mpm, PitchTracker, TrackerConfig};
@@ -68,12 +69,30 @@ fn detect_and_process_do_not_allocate() {
         })
         .collect();
 
+    // Room noise below and above the default gate: the noise floor and the
+    // automatic gate (the detector runs on sub-gate frames too).
+    let mut seed = 1u32;
+    let room: Vec<f32> = (0..48000)
+        .map(|i| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let level = if i < 24000 { 3e-4 } else { 0.02 };
+            level * (seed as f32 / u32::MAX as f32 - 0.5)
+        })
+        .collect();
+
     let mut mpm = Mpm::new(sr, n);
     let mut tracker = PitchTracker::new(sr, n, TrackerConfig::default());
     let mut drone_tracker = PitchTracker::new(sr, n, TrackerConfig::default());
 
     let before = allocations();
     let mut pitched = 0;
+    let mut gates = 0.0f32;
+    for frame in room.windows(n).step_by(512) {
+        let _ = tracker.process(frame, 440.0);
+        gates += tracker.gate() + tracker.noise_floor().unwrap_or(0.0);
+    }
     for frame in signal
         .windows(n)
         .step_by(512)
@@ -111,6 +130,7 @@ fn detect_and_process_do_not_allocate() {
     let _ = tracker.process(&signal[..n], 442.0);
     let after = allocations();
 
+    assert!(gates > 0.0);
     assert!(pitched > 100);
     assert!(leaks > 20);
     assert_eq!(after - before, 0, "allocated on the hot path");

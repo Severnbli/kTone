@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { wrapWasm, type WasmModule } from './index';
 import type { Analyzer, AnalyzerSettings } from './types';
+import { GATE_MARGIN_DB, GATE_MAX_DBFS, GATE_MIN_DBFS } from './noiseFloor';
+import { feedNoise } from '../test/noise';
 
 // Vitest runs from web/; jsdom gives modules http URLs, so resolve from cwd.
 const pkgDir = `${resolve('src/wasm-pkg')}/`;
@@ -41,6 +43,27 @@ const settings = (overrides: Partial<AnalyzerSettings> = {}): AnalyzerSettings =
 });
 
 describe.skipIf(!hasWasm)('WASM engine adapter', () => {
+  it('measures the noise floor and sets the gate above it', async () => {
+    const a = await load();
+    expect(a.noiseFloor).toBeNull();
+    expect(20 * Math.log10(a.gate)).toBeCloseTo(-46.02, 1);
+    // Quiet room: the gate drops to its minimum, −60 dBFS.
+    const quiet = feedNoise(a, -75);
+    expect(quiet.pitched).toBe(0);
+    expect(quiet.floorDb).toBeGreaterThan(-78);
+    expect(quiet.floorDb).toBeLessThan(-74);
+    expect(quiet.gateDb).toBeCloseTo(GATE_MIN_DBFS, 3);
+    // Moderate noise: the floor plus 11 dB.
+    const room = feedNoise(a, -55, 2);
+    expect(room.pitched).toBe(0);
+    expect(room.gateDb - room.floorDb!).toBeCloseTo(GATE_MARGIN_DB, 3);
+    // Noisy room: pinned at the maximum, −34 dBFS.
+    const noisy = feedNoise(a, -40, 2);
+    expect(noisy.pitched).toBe(0);
+    expect(noisy.gateDb).toBeCloseTo(GATE_MAX_DBFS, 3);
+    a.dispose();
+  });
+
   it('detects A4 and maps every field', async () => {
     const a = await load();
     a.configure(settings());

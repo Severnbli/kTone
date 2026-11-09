@@ -112,7 +112,11 @@ export const ru = {
   droneStateOn: 'звучит',
   droneStateOff: 'выключен',
   levelHelp: 'Что показывает шкала',
-  levelGateHelp: 'Чёрточка на шкале – порог распознавания: звук тише неё не анализируется.',
+  levelGateHelp:
+    'Чёрточка на шкале – порог распознавания: звук тише неё не анализируется. Порог настраивается сам – чуть выше шума в комнате.',
+  levelFloor: 'Шум в комнате',
+  levelFloorHelp: 'Затенённая полоса – измеренный уровень шума вокруг.',
+  noisyRoom: 'Вокруг шумно – распознавание может пропускать тихие ноты',
   namingNote: 'до-ре-ми – русские октавы (ля первой октавы), C-D-E – научная нотация (A4).',
   // About section and source link
   aboutTitle: 'О kTone',
@@ -234,7 +238,11 @@ export const en: Strings = {
   droneStateOn: 'playing',
   droneStateOff: 'off',
   levelHelp: 'What the meter shows',
-  levelGateHelp: 'The tick on the meter is the detection threshold: quieter sound is not analyzed.',
+  levelGateHelp:
+    'The tick on the meter is the detection threshold: quieter sound is not analyzed. It adjusts itself to sit just above the room noise.',
+  levelFloor: 'Room noise',
+  levelFloorHelp: 'The shaded band is the measured background noise level.',
+  noisyRoom: 'It is noisy around you – quiet notes may be missed',
   namingNote: 'do-re-mi uses fixed do; C-D-E uses scientific pitch notation (A4).',
   // About section and source link
   aboutTitle: 'About kTone',

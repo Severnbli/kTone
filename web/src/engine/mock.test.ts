@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Analyzer, KeySpec, PitchFrame } from './types';
 import { createMockAnalyzer, detectPitch, spellInKey } from './mock';
 import { createAnalyzer } from './index';
+import { GATE_MARGIN_DB, GATE_MAX_DBFS, GATE_MIN_DBFS } from './noiseFloor';
+import { feedNoise } from '../test/noise';
 
 const SR = 48000;
 const key = (tonic: KeySpec['tonic'], accidental: number, mode: KeySpec['mode']): KeySpec => ({
@@ -24,6 +26,27 @@ function voiceLike(hz: number, n = 2048): Float32Array {
 }
 
 describe('mock analyzer', () => {
+  it('measures the noise floor and sets the gate above it', async () => {
+    const a = await createMockAnalyzer(SR);
+    expect(a.noiseFloor).toBeNull();
+    expect(20 * Math.log10(a.gate)).toBeCloseTo(-46.02, 1);
+    // Quiet room: the gate drops to its minimum, −60 dBFS.
+    const quiet = feedNoise(a, -75);
+    expect(quiet.pitched).toBe(0);
+    expect(quiet.floorDb).toBeGreaterThan(-78);
+    expect(quiet.floorDb).toBeLessThan(-74);
+    expect(quiet.gateDb).toBeCloseTo(GATE_MIN_DBFS, 3);
+    // Moderate noise: the floor plus 11 dB.
+    const room = feedNoise(a, -55, 2);
+    expect(room.pitched).toBe(0);
+    expect(room.gateDb - room.floorDb!).toBeCloseTo(GATE_MARGIN_DB, 3);
+    // Noisy room: pinned at the maximum, −34 dBFS.
+    const noisy = feedNoise(a, -40, 2);
+    expect(noisy.pitched).toBe(0);
+    expect(noisy.gateDb).toBeCloseTo(GATE_MAX_DBFS, 3);
+    a.dispose();
+  });
+
   it('exposes frame and hop sizes', async () => {
     const a = await createMockAnalyzer(SR);
     expect(a.frameSize).toBe(2048);

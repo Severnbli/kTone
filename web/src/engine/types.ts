@@ -78,6 +78,18 @@ export interface Analyzer {
   setDrone(hz: number | null, filter: boolean): void;
   /** True when the last `process` call heard the drone leaking into the microphone. */
   readonly droneLeak: boolean;
+  /**
+   * Background noise floor (linear RMS) measured while listening, or null
+   * while it is still being measured. Updated by every `process` call,
+   * pitched or not.
+   */
+  readonly noiseFloor: number | null;
+  /**
+   * RMS gate (linear) the next frame must reach to be analyzed: set
+   * automatically a margin above `noiseFloor`, within fixed bounds, and a
+   * default until the floor is known. Updated by every `process` call.
+   */
+  readonly gate: number;
   /** All 30 supported keys (15 major, 15 minor). */
   keys(): KeySpec[];
   /** Sharps (positive) or flats (negative) in the key signature. */

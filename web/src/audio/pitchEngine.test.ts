@@ -149,6 +149,9 @@ describe('PitchEngine', () => {
     expect(onLevel).toHaveBeenCalledTimes(2);
     expect(levels.level.rmsDb).toBeCloseTo(-9.03, 1);
     expect(levels.level.peak).toBeCloseTo(0.5, 2);
+    // The analyzer's live gate: the default (−46 dBFS) until the floor is known.
+    expect(levels.level.gateDb).toBeCloseTo(-46.02, 1);
+    expect(levels.level.floorDb).toBeNull();
 
     // Silence produces no pitch but still updates the level.
     mic.feedSine(0, 2048);

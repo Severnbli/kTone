@@ -29,6 +29,8 @@ interface WasmAnalyzer {
   spell(midi: number): Int32Array;
   setDrone(hz: number, filter: boolean): void;
   readonly droneLeak: boolean;
+  readonly noiseFloor: number;
+  readonly gate: number;
   reset(): void;
   free(): void;
 }
@@ -119,6 +121,13 @@ export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
     },
     get droneLeak() {
       return inner.droneLeak;
+    },
+    get noiseFloor() {
+      const floor = inner.noiseFloor;
+      return floor > 0 ? floor : null;
+    },
+    get gate() {
+      return inner.gate;
     },
     keys: () => keys.map((k) => ({ ...k })),
     signature: (key) => mod.keySignature(letterIndex(key.tonic), key.accidental, modeIndex(key)),

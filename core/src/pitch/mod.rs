@@ -54,6 +54,20 @@
 //! unpitched. If the residual repeats at half the period, the singer is an
 //! octave above the drone (the mixture fooled the detector) and the pitch is
 //! doubled. See `docs/decisions.md` for the thresholds.
+//!
+//! Automatic noise gate: the RMS gate follows the room. The tracker estimates
+//! the background noise floor with minimum statistics: the quietest frame RMS
+//! over the last [`NOISE_WINDOW_SECS`] of *unpitched* frames (kept as
+//! [`NOISE_SUBWINDOWS`] sub-window minima, so the window slides without
+//! storing every frame). Frames with a confident pitch (clarity and range, at
+//! any level) and the [`NOISE_HOLDOFF_SECS`] after them never raise the
+//! floor, so a sustained note, its vibrato dips and its reverb tail cannot
+//! drag it up; any frame quieter than the floor lowers it at once. The floor
+//! therefore falls immediately and rises only after a whole window of louder
+//! noise. The gate is the floor plus [`GATE_MARGIN_DB`], clamped to
+//! [`GATE_MIN_DBFS`]..[`GATE_MAX_DBFS`]; until [`NOISE_SETTLE_SECS`] of
+//! unpitched frames are seen it is `rms_threshold`. See
+//! [`PitchTracker::noise_floor`] and [`PitchTracker::gate`].
 
 mod fft;
 
@@ -133,6 +147,28 @@ pub const SHORT_WINDOW_MAX_JUMP: f64 = 1.5;
 /// Partials of the app drone as multiples of its frequency: a sine on the
 /// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
 pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
+/// Length of the noise-floor window (minimum statistics), see the module docs.
+pub const NOISE_WINDOW_SECS: f32 = 1.5;
+/// Unpitched audio needed before the floor replaces `rms_threshold`.
+pub const NOISE_SETTLE_SECS: f32 = 0.5;
+/// After a pitched frame, unpitched frames are not used to raise the floor
+/// for this long (note tails, reverb, breathy dips inside a note).
+pub const NOISE_HOLDOFF_SECS: f32 = 0.3;
+/// The noise-floor window is kept as this many sub-window minima.
+pub const NOISE_SUBWINDOWS: usize = 6;
+/// The automatic gate sits this far above the noise floor.
+pub const GATE_MARGIN_DB: f32 = 11.0;
+/// Lowest automatic gate: below this the detector itself gets unreliable.
+pub const GATE_MIN_DBFS: f32 = -60.0;
+/// Highest automatic gate: a voice at this level is always analyzed, however
+/// noisy the room.
+pub const GATE_MAX_DBFS: f32 = -34.0;
+/// Default noise window/settle/hold-off in frames (hop 512 at 48 kHz).
+const DEFAULT_NOISE_WINDOW: usize = 141;
+const DEFAULT_NOISE_SETTLE: usize = 47;
+const DEFAULT_NOISE_HOLDOFF: usize = 28;
+/// Upper bound for the noise frame counts (about 40 s at hop 512, 48 kHz).
+const MAX_NOISE_FRAMES: usize = 4096;
 /// Residual clarity at half the detected period above which a frame on the
 /// drone pitch is taken as a voice an octave above the drone: the odd
 /// harmonics of the drone pitch left after the fit (3, 5, 7, 9) must be
@@ -593,8 +629,20 @@ pub struct TrackerConfig {
     pub max_hz: f32,
     /// Frames with clarity below this are treated as unpitched.
     pub clarity_threshold: f32,
-    /// Frames with RMS below this are treated as silence.
+    /// Frames with RMS below this are treated as silence. With `auto_gate`,
+    /// only until the noise floor has settled.
     pub rms_threshold: f32,
+    /// Derive the RMS gate from the measured noise floor (see the module docs).
+    pub auto_gate: bool,
+    /// Noise-floor window in unpitched frames (clamped to `1..=4096`).
+    /// [`TrackerConfig::for_hop`] sizes it to [`NOISE_WINDOW_SECS`].
+    pub noise_window: usize,
+    /// Unpitched frames before the floor is trusted (clamped to `1..=4096`),
+    /// sized to [`NOISE_SETTLE_SECS`] by [`TrackerConfig::for_hop`].
+    pub noise_settle: usize,
+    /// Frames after a pitched one that do not raise the floor (clamped to
+    /// `0..=4096`), sized to [`NOISE_HOLDOFF_SECS`] by [`TrackerConfig::for_hop`].
+    pub noise_holdoff: usize,
     /// Median filter length in frames (odd).
     pub median_window: usize,
     /// How far (cents) past the midpoint between two semitones the pitch must
@@ -635,6 +683,13 @@ impl TrackerConfig {
             config.center_window = (frames as usize).clamp(1, MAX_CENTER_WINDOW);
             let dwell = (SWITCH_DWELL_SECS as f64 * sample_rate as f64 / hop as f64).round();
             config.switch_dwell = (dwell as usize).clamp(1, MAX_SWITCH_DWELL);
+            let frames = |secs: f32| {
+                let n = (secs as f64 * sample_rate as f64 / hop as f64).round();
+                (n as usize).clamp(1, MAX_NOISE_FRAMES)
+            };
+            config.noise_window = frames(NOISE_WINDOW_SECS);
+            config.noise_settle = frames(NOISE_SETTLE_SECS);
+            config.noise_holdoff = frames(NOISE_HOLDOFF_SECS);
         }
         config
     }
@@ -645,13 +700,19 @@ impl Default for TrackerConfig {
     /// median over 3 frames (about 30 ms at hop 512), 30 cents hysteresis
     /// with a 6 frame (64 ms) dwell for swinging notes, short window on, vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
     /// drone check within ±15 cents; drone-pitched frames need 0.1 % (-30 dB)
-    /// of periodic non-drone energy with residual clarity 0.5 to count as voice.
+    /// of periodic non-drone energy with residual clarity 0.5 to count as voice;
+    /// automatic gate on, with a 1.5 s noise window, 0.5 s settle and 0.3 s
+    /// hold-off.
     fn default() -> Self {
         Self {
             min_hz: 70.0,
             max_hz: 1400.0,
             clarity_threshold: 0.8,
             rms_threshold: 0.005,
+            auto_gate: true,
+            noise_window: DEFAULT_NOISE_WINDOW,
+            noise_settle: DEFAULT_NOISE_SETTLE,
+            noise_holdoff: DEFAULT_NOISE_HOLDOFF,
             median_window: 3,
             hysteresis_cents: 30.0,
             switch_dwell: DEFAULT_SWITCH_DWELL,
@@ -750,6 +811,100 @@ pub struct PitchTracker {
     drone_hz: f64,
     drone_filter: bool,
     drone_leak: bool,
+    noise: NoiseFloor,
+}
+
+/// Minimum-statistics noise-floor estimate, see the module docs. Fixed size,
+/// never allocates.
+#[derive(Debug, Clone)]
+struct NoiseFloor {
+    /// Minima of the completed sub-windows (RMS), `filled` of them valid.
+    minima: [f64; NOISE_SUBWINDOWS],
+    filled: usize,
+    pos: usize,
+    /// Minimum and frame count of the sub-window being filled.
+    current: f64,
+    current_len: usize,
+    sub_len: usize,
+    /// Unpitched frames counted since the reset (saturating).
+    counted: usize,
+    settle: usize,
+    holdoff: usize,
+    holdoff_left: usize,
+}
+
+impl NoiseFloor {
+    fn new(config: &TrackerConfig) -> Self {
+        let window = config.noise_window.clamp(1, MAX_NOISE_FRAMES);
+        Self {
+            minima: [f64::INFINITY; NOISE_SUBWINDOWS],
+            filled: 0,
+            pos: 0,
+            current: f64::INFINITY,
+            current_len: 0,
+            sub_len: window.div_ceil(NOISE_SUBWINDOWS),
+            counted: 0,
+            settle: config.noise_settle.clamp(1, MAX_NOISE_FRAMES),
+            holdoff: config.noise_holdoff.min(MAX_NOISE_FRAMES),
+            holdoff_left: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.minima = [f64::INFINITY; NOISE_SUBWINDOWS];
+        self.filled = 0;
+        self.pos = 0;
+        self.current = f64::INFINITY;
+        self.current_len = 0;
+        self.counted = 0;
+        self.holdoff_left = 0;
+    }
+
+    /// Feeds one analyzed frame: its RMS and whether it had a confident pitch.
+    fn push(&mut self, rms: f64, pitched: bool) {
+        if !(rms.is_finite() && rms > 0.0) {
+            return;
+        }
+        if pitched || self.holdoff_left > 0 {
+            if pitched {
+                self.holdoff_left = self.holdoff;
+            } else {
+                self.holdoff_left -= 1;
+            }
+            // Never raises the floor, but a quieter frame still lowers it.
+            if rms < self.raw() {
+                self.current = rms;
+            }
+            return;
+        }
+        self.current = self.current.min(rms);
+        self.current_len += 1;
+        self.counted = self.counted.saturating_add(1);
+        if self.current_len >= self.sub_len {
+            self.minima[self.pos] = self.current;
+            self.pos = (self.pos + 1) % NOISE_SUBWINDOWS;
+            self.filled = (self.filled + 1).min(NOISE_SUBWINDOWS);
+            self.current = f64::INFINITY;
+            self.current_len = 0;
+        }
+    }
+
+    /// Minimum over the window (infinite before any frame).
+    fn raw(&self) -> f64 {
+        self.minima[..self.filled]
+            .iter()
+            .fold(self.current, |m, &v| m.min(v))
+    }
+
+    /// The floor once settled.
+    fn floor(&self) -> Option<f64> {
+        let raw = self.raw();
+        (self.counted >= self.settle && raw.is_finite()).then_some(raw)
+    }
+}
+
+fn db_to_linear(db: f32) -> f64 {
+    10f64.powf(db as f64 / 20.0)
 }
 
 impl PitchTracker {
@@ -790,7 +945,43 @@ impl PitchTracker {
             drone_hz: 0.0,
             drone_filter: false,
             drone_leak: false,
+            noise: NoiseFloor::new(&config),
         }
+    }
+
+    /// Estimated background noise floor (linear RMS), or `None` while it is
+    /// still being measured (or with `auto_gate` off). Updated on every frame,
+    /// pitched or not.
+    pub fn noise_floor(&self) -> Option<f32> {
+        if !self.config.auto_gate {
+            return None;
+        }
+        self.noise.floor().map(|f| f as f32)
+    }
+
+    /// RMS gate (linear) the next frame must reach to be analyzed: the noise
+    /// floor plus [`GATE_MARGIN_DB`], clamped to [`GATE_MIN_DBFS`]..
+    /// [`GATE_MAX_DBFS`]; `rms_threshold` until the floor has settled or with
+    /// `auto_gate` off.
+    pub fn gate(&self) -> f32 {
+        self.gate_f64() as f32
+    }
+
+    fn gate_f64(&self) -> f64 {
+        match self.noise_floor() {
+            Some(floor) => (floor as f64 * db_to_linear(GATE_MARGIN_DB))
+                .clamp(db_to_linear(GATE_MIN_DBFS), db_to_linear(GATE_MAX_DBFS)),
+            None => self.config.rms_threshold as f64,
+        }
+    }
+
+    /// A detector estimate the noise floor must not learn from: clear and in range.
+    fn confident(&self, est: Option<PitchEstimate>) -> bool {
+        est.is_some_and(|e| {
+            e.clarity >= self.config.clarity_threshold
+                && e.frequency_hz >= self.config.min_hz
+                && e.frequency_hz <= self.config.max_hz
+        })
     }
 
     /// Tells the tracker which drone the app is playing: `None`, zero or a
@@ -824,12 +1015,25 @@ impl PitchTracker {
         let Some(rms) = rms(frame) else {
             return self.invalid();
         };
-        // Gates are written as "passes" checks so a NaN threshold rejects the frame.
-        let loud_enough = rms >= self.config.rms_threshold as f64;
-        if !loud_enough || has_silent_edge(frame) {
+        if has_silent_edge(frame) {
             return self.invalid();
         }
-        let Some(est) = self.detect(frame) else {
+        // Gates are written as "passes" checks so a NaN threshold rejects the frame.
+        let loud_enough = rms >= self.gate_f64();
+        if !loud_enough {
+            if self.config.auto_gate {
+                // The full detector even below the gate: a quiet but clear
+                // pitch (a soft voice, a hum) must not be learned as noise.
+                let est = self.mpm.detect(frame);
+                self.noise.push(rms, self.confident(est));
+            }
+            return self.invalid();
+        }
+        let est = self.detect(frame);
+        if self.config.auto_gate {
+            self.noise.push(rms, self.confident(est));
+        }
+        let Some(est) = est else {
             return self.invalid();
         };
         let clear_enough = est.clarity >= self.config.clarity_threshold;
@@ -891,9 +1095,11 @@ impl PitchTracker {
         })
     }
 
-    /// Clear smoothing history (e.g. after the user changes settings).
+    /// Clear smoothing history and the noise floor (e.g. after the user
+    /// changes settings or the input device).
     pub fn reset(&mut self) {
         self.clear_state();
+        self.noise.reset();
         self.invalid_run = 0;
         self.drone_leak = false;
     }

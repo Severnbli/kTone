@@ -188,11 +188,12 @@ describe('LevelHints', () => {
     expect(h.hint).toBe('none');
     t = run(h, roomNoise, false, t + HOP_MS, HOP_MS, noisy);
     expect(h.hint).toBe('noisy');
-    // Singing above the gate keeps it; a soft voice below the gate gets "quiet".
+    // Singing above the gate keeps it, and so do noise swells or a soft voice
+    // below the gate (they would otherwise look "quiet").
     t = run(h, { rmsDb: -25, peak: 0.1 }, true, t + HOP_MS, 2000, noisy);
     expect(h.hint).toBe('noisy');
-    t = run(h, { rmsDb: -37, peak: 0.02 }, false, t + HOP_MS, QUIET_ENTER_MS, noisy);
-    expect(h.hint).toBe('quiet');
+    t = run(h, { rmsDb: -37, peak: 0.02 }, false, t + HOP_MS, 3000, noisy);
+    expect(h.hint).toBe('noisy');
     // The room quiets down: the hint goes away.
     run(h, noise, false, t + HOP_MS, HINT_EXIT_MS + HOP_MS);
     expect(h.hint).toBe('none');

@@ -80,9 +80,11 @@ const ENTER_MS: Record<LevelHint, number> = {
  * Hint state machine with time hysteresis. The raw condition per frame, in
  * this order:
  * - `loud`: a clipped sample within the last CLIP_HOLD_MS;
+ * - `noisy`: the gate is within 3 dB of its upper bound (a noisy room). It
+ *   wins over `quiet`: noise fluctuations would look like a quiet singer, and
+ *   the hint already says that quiet notes may be missed;
  * - `quiet`: no pitch, and the level is at least QUIET_ABOVE_FLOOR_DB above
  *   the analyzer's noise floor but below its gate (unknown floor: never);
- * - `noisy`: the gate is within 3 dB of its upper bound (a noisy room);
  * - `none`: anything else.
  * The shown hint switches to a new raw condition only after it has held
  * without interruption for its ENTER_MS (HINT_EXIT_MS for `none`), so it
@@ -103,6 +105,7 @@ export class LevelHints {
     const { gateDb, floorDb } = gate;
     let raw: LevelHint = 'none';
     if (nowMs - this.lastClipMs <= CLIP_HOLD_MS) raw = 'loud';
+    else if (gateDb !== null && gateDb >= NOISY_GATE_DBFS) raw = 'noisy';
     else if (
       !voiced &&
       gateDb !== null &&
@@ -111,7 +114,6 @@ export class LevelHints {
       level.rmsDb < gateDb
     )
       raw = 'quiet';
-    else if (gateDb !== null && gateDb >= NOISY_GATE_DBFS) raw = 'noisy';
 
     if (raw !== this.candidate) {
       this.candidate = raw;

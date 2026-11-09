@@ -778,7 +778,7 @@ select {
   position: absolute;
   right: 0;
   bottom: calc(100% + 4px);
-  z-index: 5;
+  z-index: 20;
   max-width: min(320px, 100%);
   margin: 0;
   padding: 10px 12px;
@@ -904,6 +904,7 @@ select {
 .dock-btn-title {
   font-size: 0.88rem;
   font-weight: 650;
+  white-space: nowrap;
 }
 
 .dock-btn-sub {

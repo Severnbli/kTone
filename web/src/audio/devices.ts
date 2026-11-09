@@ -42,6 +42,23 @@ export function resolveDeviceId(saved: string, list: AudioInputs): string {
   return list.inputs.some((d) => d.deviceId === saved) ? saved : '';
 }
 
+const permissionListeners = new Set<() => void>();
+
+/**
+ * Tells the pickers that the microphone permission was just granted (a
+ * `getUserMedia` call succeeded): the device names are visible now, but
+ * browsers do not reliably fire `devicechange` for that.
+ */
+export function announceMicPermission(): void {
+  permissionListeners.forEach((l) => l());
+}
+
+/** Calls `listener` after every `announceMicPermission`. Returns an unsubscribe. */
+export function onMicPermission(listener: () => void): () => void {
+  permissionListeners.add(listener);
+  return () => void permissionListeners.delete(listener);
+}
+
 export function browserMediaDevices(): MediaDevicesLike | null {
   const md = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices;
   return md && typeof md.enumerateDevices === 'function' ? md : null;

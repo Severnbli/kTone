@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { onMicPermission } from './devices';
 import { MicError, micConstraints, micState, openMicStream, watchMicState } from './mic';
 
 function fakeTrack() {
@@ -134,5 +135,26 @@ describe('openMicStream', () => {
     await expect(openMicStream(gum)).rejects.toMatchObject({ code: 'notFound' });
     await expect(openMicStream(gum, 'stale')).rejects.toBeInstanceOf(MicError);
     expect(gum).toHaveBeenCalledTimes(3);
+  });
+
+  it('announces the permission after a successful open, not after a failure', async () => {
+    const granted = vi.fn();
+    const off = onMicPermission(granted);
+    const denied = vi.fn(async () => {
+      throw new DOMException('no', 'NotAllowedError');
+    });
+    await expect(openMicStream(denied)).rejects.toBeInstanceOf(MicError);
+    expect(granted).not.toHaveBeenCalled();
+    await openMicStream(async () => stream);
+    expect(granted).toHaveBeenCalledTimes(1);
+    // The default-device fallback counts too.
+    await openMicStream(async (c) => {
+      if (exactId(c)) throw Object.assign(new Error('gone'), { name: 'NotFoundError' });
+      return stream;
+    }, 'stale');
+    expect(granted).toHaveBeenCalledTimes(2);
+    off();
+    await openMicStream(async () => stream);
+    expect(granted).toHaveBeenCalledTimes(2);
   });
 });

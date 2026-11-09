@@ -4,6 +4,7 @@
 // (track ended or muted, context suspended or interrupted) via `onStateChange`.
 
 import type { AudioLatency } from './debugStats';
+import { announceMicPermission } from './devices';
 import { isContextPaused, resumeContext } from './lifecycle';
 
 export type MicErrorCode = 'denied' | 'notFound' | 'unsupported' | 'error';
@@ -137,15 +138,19 @@ export async function openMicStream(
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
   deviceId?: string,
 ): Promise<MediaStream> {
+  const granted = (stream: MediaStream) => {
+    announceMicPermission();
+    return stream;
+  };
   try {
-    return await getUserMedia(micConstraints(deviceId));
+    return granted(await getUserMedia(micConstraints(deviceId)));
   } catch (err) {
     if (!deviceId || !MISSING_DEVICE.has(errorName(err))) {
       throw new MicError(classifyMicError(err), err);
     }
   }
   try {
-    return await getUserMedia(micConstraints());
+    return granted(await getUserMedia(micConstraints()));
   } catch (err) {
     throw new MicError(classifyMicError(err), err);
   }

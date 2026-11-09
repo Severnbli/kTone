@@ -36,38 +36,42 @@ export function NoteDisplay({ store, naming, degreeStyle, hint }: Props) {
   if (snap && !snap.inKey) classes.push('out-of-key');
   if (!snap?.active) classes.push('inactive');
 
+  // Only the note itself is a live region: the frequency changes ten times a
+  // second and would make a screen reader talk non-stop.
   return (
-    <section className={classes.join(' ')} data-testid="note-display" aria-live="polite">
-      {f && snap ? (
-        <>
-          <div className="note-name" data-testid="note-name" aria-label={f.full}>
-            <span className="note-letter">{f.name}</span>
-            {f.accidental && <span className="note-accidental">{f.accidental}</span>}
-            {!solfegeRu && <sub className="note-octave-num">{f.octave}</sub>}
-          </div>
-          {solfegeRu && (
-            <div className="note-octave" data-testid="note-octave">
-              {f.octave}
+    <section className={classes.join(' ')} data-testid="note-display">
+      <div className="note-live" aria-live="polite" aria-atomic="true">
+        {f && snap ? (
+          <>
+            <div className="note-name" data-testid="note-name" aria-label={f.full}>
+              <span className="note-letter">{f.name}</span>
+              {f.accidental && <span className="note-accidental">{f.accidental}</span>}
+              {!solfegeRu && <sub className="note-octave-num">{f.octave}</sub>}
             </div>
-          )}
-          <div className="note-degree" data-testid="note-degree">
-            {snap.degree !== null ? (
-              <>
-                {t.degree} <strong>{formatDegree(snap.degree, degreeStyle)}</strong>
-              </>
-            ) : (
-              <span className="out-of-key-label">{t.outOfKey}</span>
+            {solfegeRu && (
+              <div className="note-octave" data-testid="note-octave">
+                {f.octave}
+              </div>
             )}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="note-name placeholder" data-testid="note-name">
-            –
-          </div>
-          <div className="note-hint">{hint}</div>
-        </>
-      )}
+            <div className="note-degree" data-testid="note-degree">
+              {snap.degree !== null ? (
+                <>
+                  {t.degree} <strong>{formatDegree(snap.degree, degreeStyle)}</strong>
+                </>
+              ) : (
+                <span className="out-of-key-label">{t.outOfKey}</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="note-name placeholder" data-testid="note-name">
+              –
+            </div>
+            <div className="note-hint">{hint}</div>
+          </>
+        )}
+      </div>
       <div className="note-hz">
         <span ref={hzRef} data-testid="note-hz">
           –

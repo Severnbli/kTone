@@ -52,6 +52,30 @@ export function russianOctave(octave: number): string {
   return RU_OCTAVES_GENITIVE[octave] ?? `${octave}`;
 }
 
+const RU_OCTAVES_SHORT = [
+  'субконтр.',
+  'контр.',
+  'большая',
+  'малая',
+  'первая',
+  'вторая',
+  'третья',
+  'четвёртая',
+  'пятая',
+];
+
+/** Short octave name for compact controls: «малая» (Russian solfège), «C3» otherwise. */
+export function octaveShort(
+  note: Pick<SpelledNote, 'letter' | 'accidental' | 'octave'>,
+  naming: NoteNaming,
+  lang: Lang,
+): string {
+  if (naming === 'solfege' && lang === 'ru') {
+    return RU_OCTAVES_SHORT[note.octave] ?? `${note.octave}`;
+  }
+  return `${pitchName(note, naming, lang)}${note.octave}`;
+}
+
 export function letterName(letter: Letter, naming: NoteNaming, lang: Lang): string {
   return naming === 'letter' ? letter : SOLFEGE[lang][letter];
 }

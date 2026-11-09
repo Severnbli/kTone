@@ -20,6 +20,8 @@ test('steady A4 shows «ля» in the green zone', async ({ page }) => {
   await page.getByRole('button', { name: 'Настройки' }).click();
   await page.getByLabel(/C-D-E/).check();
   await expect(page.getByTestId('note-name')).toHaveText('A4');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await page.getByTestId('start-stop').click();
   await expect(page.getByTestId('start-stop')).toHaveText('Начать');

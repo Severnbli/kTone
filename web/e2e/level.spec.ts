@@ -30,6 +30,7 @@ test('the level meter follows the input and the mic can be switched', async ({ p
   await expect(meter).toHaveAttribute('data-state', 'ok');
   expect(await page.evaluate(() => localStorage.getItem('ktone.settings.v1'))).toContain(id!);
 
+  await page.keyboard.press('Escape');
   await page.getByTestId('start-stop').click();
   await expect(meter).toHaveAttribute('data-state', 'off');
 });

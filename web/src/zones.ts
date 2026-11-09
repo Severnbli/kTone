@@ -23,8 +23,9 @@ export function needlePercent(cents: number): number {
   return 50 + (c / GAUGE_RANGE) * 50;
 }
 
+/** Dark ("stage") theme zone colors; the CSS tokens `--zone-*` are the source of truth. */
 export const ZONE_COLORS: Record<Zone, string> = {
-  green: '#22a559',
-  yellow: '#e0a800',
-  red: '#e5484d',
+  green: '#3ee6a0',
+  yellow: '#ffc94d',
+  red: '#ff6b57',
 };

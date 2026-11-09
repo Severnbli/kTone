@@ -28,32 +28,16 @@ function setup() {
 }
 
 describe('SettingsPanel', () => {
-  it('lists all 30 keys grouped into major and minor with Russian names', () => {
+  it('groups the settings and leaves key and clef to the header chips', () => {
     setup();
-    const select = screen.getByLabelText('Тональность') as HTMLSelectElement;
-    expect(select.querySelectorAll('option')).toHaveLength(30);
-    const groups = select.querySelectorAll('optgroup');
-    expect([...groups].map((g) => g.label)).toEqual(['Мажор', 'Минор']);
-    expect(screen.getByRole('option', { name: 'Ре мажор' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'си минор' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Ре-бемоль мажор' })).toBeInTheDocument();
-  });
-
-  it('propagates key changes', () => {
-    const { last } = setup();
-    fireEvent.change(screen.getByLabelText('Тональность'), { target: { value: 'D-major' } });
-    expect(last().key).toEqual({ tonic: 'D', accidental: 0, mode: 'major' });
-    fireEvent.change(screen.getByLabelText('Тональность'), { target: { value: 'Bb-minor' } });
-    expect(last().key).toEqual({ tonic: 'B', accidental: -1, mode: 'minor' });
-  });
-
-  it('propagates clef changes and lists Russian clef names', () => {
-    const { last } = setup();
-    for (const name of ['скрипичный', 'скрипичный октавный', 'басовый', 'альтовый', 'теноровый']) {
-      expect(screen.getByRole('option', { name })).toBeInTheDocument();
-    }
-    fireEvent.change(screen.getByLabelText('Ключ'), { target: { value: 'bass' } });
-    expect(last().clef).toBe('bass');
+    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual([
+      'Звук',
+      'Нотация',
+      'Точность',
+      'Интерфейс',
+    ]);
+    expect(screen.queryByLabelText('Тональность')).toBeNull();
+    expect(screen.queryByLabelText('Ключ')).toBeNull();
   });
 
   it('commits A4 only within 415–466', () => {
@@ -87,7 +71,7 @@ describe('SettingsPanel', () => {
 
   it('toggles the drone filter', () => {
     const { last } = setup();
-    const box = screen.getByLabelText('Не принимать бурдон за голос');
+    const box = screen.getByRole('switch', { name: 'Не принимать бурдон за голос' });
     expect(box).toBeChecked();
     fireEvent.click(box);
     expect(last().droneFilter).toBe(false);
@@ -96,11 +80,29 @@ describe('SettingsPanel', () => {
     expect(last().droneFilter).toBe(true);
   });
 
+  it('sets the drone octave and volume', () => {
+    const { last } = setup();
+    fireEvent.click(screen.getByLabelText('до первой октавы'));
+    expect(last().drone).toEqual({ volume: 0.3, octave: 4 });
+    fireEvent.change(screen.getByLabelText('Громкость бурдона'), { target: { value: '0.6' } });
+    expect(last().drone).toEqual({ volume: 0.6, octave: 4 });
+  });
+
   it('switches the UI language', () => {
     const { last } = setup();
-    fireEvent.change(screen.getByLabelText('Язык'), { target: { value: 'en' } });
+    expect(screen.getByLabelText('Русский')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('English'));
     expect(last().lang).toBe('en');
-    expect(screen.getByLabelText('Key')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'D major' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Interface' })).toBeInTheDocument();
+    expect(screen.getByLabelText('English')).toBeChecked();
+  });
+
+  it('switches the theme: system, dark or light', () => {
+    const { last } = setup();
+    expect(screen.getByLabelText('Как в системе')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('Тёмная'));
+    expect(last().theme).toBe('dark');
+    fireEvent.click(screen.getByLabelText('Светлая'));
+    expect(last().theme).toBe('light');
   });
 });

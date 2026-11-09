@@ -9,9 +9,13 @@ export const CLEFS: readonly ClefId[] = ['treble', 'treble8vb', 'bass', 'alto', 
 export const A4_MIN = 415;
 export const A4_MAX = 466;
 export const DRONE_OCTAVES = [2, 3, 4, 5] as const;
+export const THEMES = ['system', 'dark', 'light'] as const;
+/** `system` follows `prefers-color-scheme` (dark when there is no preference). */
+export type Theme = (typeof THEMES)[number];
 
 export interface Settings {
   lang: Lang;
+  theme: Theme;
   key: KeySpec;
   clef: ClefId;
   a4Hz: number;
@@ -27,6 +31,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   lang: 'ru',
+  theme: 'system',
   key: DEFAULT_KEY,
   clef: 'treble',
   a4Hz: 440,
@@ -60,6 +65,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   const droneRaw = (r.drone ?? {}) as Record<string, unknown>;
   return {
     lang: r.lang === 'en' || r.lang === 'ru' ? r.lang : d.lang,
+    theme: THEMES.includes(r.theme as Theme) ? (r.theme as Theme) : d.theme,
     key: { ...key },
     clef: CLEFS.includes(r.clef as ClefId) ? (r.clef as ClefId) : d.clef,
     a4Hz: isNum(r.a4Hz) ? clamp(r.a4Hz, A4_MIN, A4_MAX) : d.a4Hz,

@@ -51,6 +51,14 @@ fn detect_and_process_do_not_allocate() {
     let octave_up: Vec<f32> = (0..n)
         .map(|i| 0.3 * (std::f32::consts::TAU * 440.0 * i as f32 / sr).sin())
         .collect();
+    // A low note (full frame only), then a leap up the short window must
+    // check on the full frame, then a high note (short window).
+    let steps: Vec<f32> = (0..36000)
+        .map(|i| {
+            let f = [110.0, 330.0, 880.0][i / 12000];
+            0.3 * (std::f32::consts::TAU * f * i as f32 / sr).sin()
+        })
+        .collect();
 
     // The drone check (least-squares fit) runs for frames on the drone pitch.
     let drone: Vec<f32> = (0..24000)
@@ -66,7 +74,11 @@ fn detect_and_process_do_not_allocate() {
 
     let before = allocations();
     let mut pitched = 0;
-    for frame in signal.windows(n).step_by(512) {
+    for frame in signal
+        .windows(n)
+        .step_by(512)
+        .chain(steps.windows(n).step_by(512))
+    {
         if mpm.detect(frame).is_some() {
             pitched += 1;
         }

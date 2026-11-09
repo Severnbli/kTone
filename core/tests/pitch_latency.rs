@@ -40,8 +40,9 @@ struct Bounds {
 
 fn bounds(c: &Case) -> Bounds {
     let octave = ((c.to - c.from).abs() - 12.0).abs() < 0.5;
-    // The frame must be mostly filled with the new note, plus the median.
-    let base = if octave { 110.0 } else { 90.0 };
+    // The frame must be mostly filled with the new note, plus the median;
+    // an octave leap waits for the octave guard.
+    let base = if octave { 80.0 } else { 60.0 };
     Bounds {
         midi: base,
         // A step of a tone or less with vibrato: a trough of the new note (or
@@ -52,7 +53,7 @@ fn bounds(c: &Case) -> Bounds {
             base
         },
         // The center of a vibrato needs most of its 300 ms window.
-        center: if c.vibrato { 350.0 } else { base },
+        center: if c.vibrato { 300.0 } else { base },
     }
 }
 

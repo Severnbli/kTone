@@ -12,6 +12,14 @@
 //! center: a triangular-weighted moving average of the accepted estimates over
 //! about 300 ms, which the UI uses to judge accuracy.
 //!
+//! Short window: while the pitch is high enough (at least
+//! [`SHORT_WINDOW_PERIODS`] periods in half a frame), only the newest half of
+//! the frame is analyzed, which halves the detector's share of the delay. A
+//! short-window estimate more than [`SHORT_WINDOW_MAX_JUMP`] semitones away
+//! from the current pitch, an unclear short window, and pitches near the drone
+//! fall back to the full frame, so leaps, low notes and octave errors are
+//! judged on the full window as before.
+//!
 //! Drone filter: when the app plays a drone (see [`PitchTracker::set_drone`]),
 //! a frame whose pitch matches the drone (or an octave of it) is checked for
 //! voice content. The known drone partials are removed by a least-squares
@@ -37,6 +45,8 @@ const SILENCE_RMS: f64 = 1e-7;
 const MAX_FRAME_SIZE: usize = 1 << 18;
 /// Smallest frame the detector can work with.
 const MIN_FRAME_SIZE: usize = 8;
+/// Smallest half frame [`PitchTracker`] uses as a short window.
+const MIN_SHORT_FRAME: usize = 256;
 
 /// Number of consecutive frames an octave jump must persist before it is accepted.
 const OCTAVE_CONFIRM_FRAMES: u32 = 4;
@@ -58,6 +68,13 @@ pub const CENTER_WINDOW_SECS: f32 = 0.3;
 const DEFAULT_CENTER_WINDOW: usize = 28;
 /// Upper bound for [`TrackerConfig::center_window`].
 const MAX_CENTER_WINDOW: usize = 255;
+/// The short (half-frame) window is used for pitches with at least this many
+/// periods in it, so the lag search keeps a wide margin below its limit
+/// (187.5 Hz, about F♯3, for 1024 samples at 48 kHz).
+pub const SHORT_WINDOW_PERIODS: f64 = 4.0;
+/// A short-window estimate this far (semitones) from the current pitch is
+/// checked on the full frame instead.
+pub const SHORT_WINDOW_MAX_JUMP: f64 = 1.5;
 /// Partials of the app drone as multiples of its frequency: a sine on the
 /// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
 pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
@@ -528,6 +545,9 @@ pub struct TrackerConfig {
     /// How far (cents) past the midpoint between two semitones the pitch must
     /// move before `stable_midi` switches to the neighbor.
     pub hysteresis_cents: f32,
+    /// Analyze only the newest half of the frame while the pitch is high
+    /// enough (see the module docs).
+    pub short_window: bool,
     /// Vibrato-center window in frames (clamped to `1..=255`). The default fits
     /// hop 512 at 48 kHz; use [`TrackerConfig::for_hop`] for other hops/rates.
     pub center_window: usize,
@@ -559,8 +579,8 @@ impl TrackerConfig {
 
 impl Default for TrackerConfig {
     /// Voice defaults: 70..1400 Hz, clarity 0.8, RMS 0.005 (about -46 dBFS),
-    /// median over 5 frames (about 50 ms at hop 512), 30 cents hysteresis,
-    /// vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
+    /// median over 3 frames (about 30 ms at hop 512), 30 cents hysteresis,
+    /// short window on, vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
     /// drone check within ±15 cents; drone-pitched frames need 0.1 % (-30 dB)
     /// of periodic non-drone energy with residual clarity 0.5 to count as voice.
     fn default() -> Self {
@@ -569,8 +589,9 @@ impl Default for TrackerConfig {
             max_hz: 1400.0,
             clarity_threshold: 0.8,
             rms_threshold: 0.005,
-            median_window: 5,
+            median_window: 3,
             hysteresis_cents: 30.0,
+            short_window: true,
             center_window: DEFAULT_CENTER_WINDOW,
             drone_tolerance_cents: 15.0,
             drone_voice_energy: 0.001,
@@ -619,6 +640,12 @@ enum DroneCheck {
 /// Allocates only in `new`; `process` must not allocate.
 pub struct PitchTracker {
     mpm: Mpm,
+    /// Detector for the newest half of the frame, see the module docs.
+    short: Option<Mpm>,
+    /// Lowest pitch (Hz) analyzed with `short`.
+    short_min_hz: f64,
+    /// The last detection ran on the full frame (not the short window).
+    full_frame: bool,
     config: TrackerConfig,
     frame_size: usize,
     /// Ring buffer of accepted estimates in semitones relative to A4 = 440 Hz
@@ -650,8 +677,17 @@ impl PitchTracker {
     pub fn new(sample_rate: f32, frame_size: usize, config: TrackerConfig) -> Self {
         let window = config.median_window.clamp(1, MAX_MEDIAN_WINDOW);
         let center_window = config.center_window.clamp(1, MAX_CENTER_WINDOW);
+        let half = frame_size / 2;
+        let short = if config.short_window && half >= MIN_SHORT_FRAME {
+            Some(Mpm::new(sample_rate, half)).filter(|m| m.usable)
+        } else {
+            None
+        };
         Self {
             mpm: Mpm::new(sample_rate, frame_size),
+            short,
+            short_min_hz: SHORT_WINDOW_PERIODS * sample_rate as f64 / half.max(1) as f64,
+            full_frame: true,
             config,
             frame_size,
             history: vec![0.0; window],
@@ -708,7 +744,7 @@ impl PitchTracker {
         if !loud_enough || has_silent_edge(frame) {
             return self.invalid();
         }
-        let Some(est) = self.mpm.detect(frame) else {
+        let Some(est) = self.detect(frame) else {
             return self.invalid();
         };
         let clear_enough = est.clarity >= self.config.clarity_threshold;
@@ -718,7 +754,7 @@ impl PitchTracker {
             return self.invalid();
         }
         let mut est = est;
-        match self.drone_check(est) {
+        match self.drone_check(est, frame) {
             DroneCheck::Drone => {
                 self.drone_leak = true;
                 if self.drone_filter {
@@ -778,9 +814,41 @@ impl PitchTracker {
         self.drone_leak = false;
     }
 
+    /// Runs the detector on the newest half of the frame when the current
+    /// pitch allows it, else (or when the short estimate is doubtful) on the
+    /// whole frame. See the module docs.
+    fn detect(&mut self, frame: &[f32]) -> Option<PitchEstimate> {
+        self.full_frame = false;
+        if let Some(est) = self.detect_short(frame) {
+            return Some(est);
+        }
+        self.full_frame = true;
+        self.mpm.detect(frame)
+    }
+
+    fn detect_short(&mut self, frame: &[f32]) -> Option<PitchEstimate> {
+        let short = self.short.as_mut()?;
+        if self.hist_len == 0 || frame.len() != self.frame_size {
+            return None;
+        }
+        // The current pitch (semitones at 440 Hz) from the median history.
+        let current = median_of(&self.history[..self.hist_len], &mut self.scratch);
+        let current_hz = 440.0 * ((current - 69.0) / 12.0).exp2();
+        if current_hz < self.short_min_hz {
+            return None;
+        }
+        let est = short.detect(&frame[frame.len() - short.frame_size..])?;
+        let f0 = est.frequency_hz as f64;
+        let raw = 69.0 + 12.0 * (f0 / 440.0).log2();
+        let trusted = est.clarity >= self.config.clarity_threshold
+            && (raw - current).abs() <= SHORT_WINDOW_MAX_JUMP
+            && f0 >= self.short_min_hz;
+        trusted.then_some(est)
+    }
+
     /// Drone leakage: the pitch is the drone's (or an octave of it) and
     /// removing the drone partials leaves almost nothing periodic.
-    fn drone_check(&mut self, est: PitchEstimate) -> DroneCheck {
+    fn drone_check(&mut self, est: PitchEstimate, frame: &[f32]) -> DroneCheck {
         let drone = self.drone_hz;
         let f0 = est.frequency_hz as f64;
         if drone <= 0.0 {
@@ -790,6 +858,10 @@ impl PitchTracker {
         let octaves = (cents / 1200.0).round();
         let off = (cents - 1200.0 * octaves).abs();
         if !(octaves.abs() <= 1.0 && off <= OCTAVE_UP_WINDOW_CENTS) {
+            return DroneCheck::Voice;
+        }
+        // The check is tuned on, and reads the residual of, the full frame.
+        if !self.full_frame && self.mpm.detect(frame).is_none() {
             return DroneCheck::Voice;
         }
         let near = off <= self.config.drone_tolerance_cents as f64;
@@ -923,19 +995,25 @@ impl PitchTracker {
     /// Median of the history (mean of the two middle values for an even count).
     /// The history must not be empty.
     fn median(&mut self) -> f64 {
-        let len = self.hist_len;
-        if len == 0 {
-            return 0.0;
-        }
         // While filling, valid entries are history[0..len]; once full, all of it.
-        let s = &mut self.scratch[..len];
-        s.copy_from_slice(&self.history[..len]);
-        s.sort_unstable_by(f64::total_cmp);
-        if len % 2 == 1 {
-            s[len / 2]
-        } else {
-            0.5 * (s[len / 2 - 1] + s[len / 2])
-        }
+        median_of(&self.history[..self.hist_len], &mut self.scratch)
+    }
+}
+
+/// Median of `values` (mean of the two middle values for an even count, 0 for
+/// none), sorted in `scratch`, which must be at least as long.
+fn median_of(values: &[f64], scratch: &mut [f64]) -> f64 {
+    let len = values.len();
+    if len == 0 {
+        return 0.0;
+    }
+    let s = &mut scratch[..len];
+    s.copy_from_slice(values);
+    s.sort_unstable_by(f64::total_cmp);
+    if len % 2 == 1 {
+        s[len / 2]
+    } else {
+        0.5 * (s[len / 2 - 1] + s[len / 2])
     }
 }
 
@@ -1033,7 +1111,7 @@ mod tests {
         for v in [7.0, 8.0, 9.0, 9.5] {
             t.push_history(v);
         }
-        // Window 5 now holds 10, 7, 8, 9, 9.5.
+        // Window 3 now holds 8, 9, 9.5.
         assert_eq!(t.median(), 9.0);
     }
 

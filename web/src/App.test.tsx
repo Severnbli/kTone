@@ -174,14 +174,76 @@ describe('App', () => {
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it('has a bottom bar with the drone, a round Start button and a disabled target slot', () => {
+  it('has a bottom bar with the drone, a round Start button and the target', () => {
     render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
     const bar = screen.getByRole('contentinfo');
     expect(bar).toContainElement(screen.getByTestId('drone-open'));
     expect(bar).toContainElement(screen.getByTestId('start-stop'));
+    expect(bar).toContainElement(screen.getByTestId('target-open'));
     expect(screen.getByTestId('start-stop')).toHaveTextContent('Начать');
-    expect(screen.getByTestId('target-slot')).toBeDisabled();
+    expect(screen.getByTestId('target-open')).toBeEnabled();
     expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName('kTone');
+  });
+
+  it('measures from the target, keeps its degree on a key change and lets the drone play it', async () => {
+    const mic = fakeMic();
+    render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+    await screen.findByRole('button', { name: 'Стоп' });
+    act(() => mic.feed(440, 2048));
+    expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-target', 'off');
+
+    // Target V of C major: G, starting near the sung A4 → octave 4 (G4).
+    fireEvent.click(screen.getByTestId('target-open'));
+    fireEvent.click(screen.getByLabelText('V · соль'));
+    expect(screen.getByTestId('target-preview')).toHaveTextContent('Цель: соль второй октавы');
+    fireEvent.click(screen.getByRole('button', { name: 'Октава ниже' }));
+    expect(screen.getByTestId('target-preview')).toHaveTextContent('Цель: соль первой октавы');
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+    act(() => mic.feed(440, 2048));
+    const gauge = screen.getByTestId('cents-gauge');
+    expect(gauge).toHaveAttribute('data-target', 'far');
+    expect(screen.getByTestId('gauge-message')).toHaveTextContent('ниже на 2 полутона');
+    expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
+    expect(screen.getByTestId('note-target')).toHaveTextContent('Цель: соль первой октавы');
+    expect(screen.getByTestId('target-head')).toBeInTheDocument();
+    expect(screen.getByTestId('target-open')).toHaveAccessibleName('Цель: соль первой октавы');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toEqual({
+      enabled: true,
+      degree: 5,
+      octave: 4,
+    });
+
+    // D major: V is A – the sung A4 is now a hit.
+    fireEvent.click(screen.getByTestId('key-badge'));
+    fireEvent.click(screen.getByRole('button', { name: 'Ре мажор' }));
+    act(() => mic.feed(440, 2048));
+    expect(screen.getByTestId('note-target')).toHaveTextContent('Цель: ля первой октавы');
+    expect(gauge).toHaveAttribute('data-target', 'near');
+    expect(gauge).toHaveAttribute('data-zone', 'green');
+
+    // The drone plays the target (A4) when asked to.
+    fireEvent.click(screen.getByTestId('drone-open'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Бурдон играет цель' }));
+    fireEvent.click(screen.getByTestId('drone-toggle'));
+    expect(screen.getByTestId('drone-open')).toHaveAccessibleName(
+      'Бурдон · ля первой октавы, звучит',
+    );
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    // With the filter on, the A4 drone leaking into the mic is not taken for a voice.
+    act(() => mic.feed(440, 4096));
+    expect(gauge).toHaveAttribute('data-zone', 'none');
+
+    // Switching the target off restores the nearest-semitone gauge.
+    fireEvent.click(screen.getByTestId('target-open'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Петь к целевой ноте' }));
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(gauge).toHaveAttribute('data-target', 'off');
+    expect(screen.queryByTestId('note-target')).toBeNull();
+    expect(screen.getByTestId('drone-open')).toHaveAccessibleName(
+      'Бурдон · ре малой октавы, звучит',
+    );
   });
 
   it('renders in English from saved settings', async () => {

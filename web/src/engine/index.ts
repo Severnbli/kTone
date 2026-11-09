@@ -111,6 +111,7 @@ export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
         staffStep: out[11],
         centerMidi: out[12],
         centerCents: out[13],
+        centerReady: out[14] === 1,
       };
     },
     setDrone(hz, filter) {

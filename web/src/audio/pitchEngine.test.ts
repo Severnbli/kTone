@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockAnalyzer } from '../engine/mock';
 import type { Analyzer, AnalyzerSettings } from '../engine/types';
 import { fakeMic, fakeVisibility, flush } from '../test/fakes';
+import { DebugStats } from './debugStats';
 import { LevelStore } from './level';
 import { MicError, classifyMicError } from './mic';
 import { PitchEngine, type EngineState } from './pitchEngine';
@@ -37,6 +38,32 @@ describe('PitchEngine', () => {
     expect(mic.stop).toHaveBeenCalled();
     expect(engine.running).toBe(false);
     expect(store.getNote()).toBeNull();
+  });
+
+  it('records analysis times and dropped hops for the debug overlay', async () => {
+    const mic = fakeMic();
+    let t = 0;
+    const debug = new DebugStats();
+    const engine = new PitchEngine(new PitchStore(), {
+      factory: createMockAnalyzer,
+      startMic: mic.startMic,
+      // Two calls per frame: before and after the analysis, 3 ms apart.
+      now: () => (t += 3),
+      debug,
+    });
+    await engine.start(settings);
+    mic.feedSine(440, 2048 + 512 * 3);
+    let s = debug.snapshot();
+    expect(s).toMatchObject({ frames: 4, dropped: 0, frameSize: 2048, hopSize: 512 });
+    expect(s.analysisMeanMs).toBe(3);
+    expect(s.analysisMaxMs).toBe(3);
+    // The fake mic reports no latency, like a browser without the API.
+    expect(s.latency).toEqual({ baseLatency: null, outputLatency: null });
+    // A late, large block: three hops at once, only the newest is analyzed.
+    mic.feed(440, 512 * 3);
+    s = debug.snapshot();
+    expect(s).toMatchObject({ frames: 5, dropped: 2 });
+    await engine.stop();
   });
 
   it('passes the drone to the analyzer and its leak flag to the store', async () => {

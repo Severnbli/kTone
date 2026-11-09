@@ -19,6 +19,7 @@ export function frame(stableMidi: number, cents = 0, extra: Partial<PitchFrame> 
     staffStep: 3,
     centerMidi: stableMidi + (extra.centerCents ?? cents) / 100,
     centerCents: cents,
+    centerReady: true,
     ...extra,
   };
 }

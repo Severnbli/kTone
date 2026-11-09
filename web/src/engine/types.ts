@@ -43,6 +43,12 @@ export interface PitchFrame {
   centerMidi: number;
   /** Deviation of `centerMidi` from `stableMidi` in cents. Judge accuracy by this. */
   centerCents: number;
+  /**
+   * False right after an onset or a note change while the center is too young
+   * to judge (with vibrato it would still follow the swing): show no zone then.
+   * Stays true until the note changes.
+   */
+  centerReady: boolean;
   clarity: number;
   rms: number;
   /** `stableMidi` spelled in the configured key. */

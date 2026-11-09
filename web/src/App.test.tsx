@@ -15,6 +15,24 @@ import {
 } from './test/fakes';
 
 describe('App', () => {
+  it('shows the debug overlay only with ?debug', async () => {
+    const { unmount } = render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    expect(screen.queryByTestId('debug-overlay')).toBeNull();
+    unmount();
+
+    window.history.replaceState(null, '', '/?debug');
+    try {
+      const mic = fakeMic();
+      render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);
+      const overlay = screen.getByTestId('debug-overlay');
+      fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+      await screen.findByRole('button', { name: 'Стоп' });
+      act(() => mic.feedSine(440, 2048 + 512));
+      await waitFor(() => expect(overlay).toHaveTextContent('dropped 0 / 2 frames'));
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
   it('starts the mic, shows the sung note, and respells on key change', async () => {
     const mic = fakeMic();
     render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);
@@ -23,6 +41,9 @@ describe('App', () => {
 
     act(() => mic.feed(440, 2048));
     expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
+    // The zone shows once the center is ready: 6 frames of a straight tone.
+    expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'pending');
+    act(() => mic.feedSine(440, 5 * 512));
     expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'green');
     expect(screen.getByTestId('level-meter')).toHaveAttribute('data-level', '-9');
 

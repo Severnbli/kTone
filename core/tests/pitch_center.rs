@@ -254,3 +254,135 @@ fn odd_center_windows_do_not_panic() {
     assert_eq!(TrackerConfig::for_hop(48000.0, 0).center_window, d);
     assert_eq!(TrackerConfig::for_hop(-1.0, 512).center_window, d);
 }
+
+/// Seconds after `from` until `center_ready` holds for good, on note `note`.
+fn ready_after(out: &[(f64, Option<TrackedPitch>)], from: f64, note: i32) -> f64 {
+    let mut first = None;
+    for (t, p) in out.iter().filter(|(t, _)| *t > from) {
+        match p {
+            Some(p) if p.stable_midi == note && p.center_ready => {
+                first.get_or_insert(*t);
+            }
+            _ => first = None,
+        }
+    }
+    first.expect("never ready") - from
+}
+
+/// Half a second of silence, then `pitch`.
+fn after_silence(sr: f64, pitch: impl Fn(f64) -> f64) -> Vec<f32> {
+    let mut signal = vec![0.0f32; (sr / 2.0) as usize];
+    signal.extend(synth(sr, 1.0, pitch));
+    signal
+}
+
+#[test]
+fn center_is_ready_at_once_for_a_straight_tone() {
+    for sr in RATES {
+        let out = track(&mut new_tracker(sr), sr, &after_silence(sr, |_| 64.0));
+        let first = out.iter().position(|(_, p)| p.is_some()).unwrap();
+        assert!(
+            !out[first].1.unwrap().center_ready,
+            "one frame is no center"
+        );
+        let ready = ready_after(&out, out[first].0 - 0.001, 64);
+        assert!(
+            ready <= 6.0 * HOP as f64 / sr,
+            "{sr}: ready after {ready:.3} s"
+        );
+    }
+}
+
+#[test]
+fn center_of_a_vibrato_is_ready_after_most_of_the_window_and_then_green() {
+    for sr in RATES {
+        let out = track(
+            &mut new_tracker(sr),
+            sr,
+            &after_silence(sr, vibrato(64.0, 0.4, 5.5)),
+        );
+        let first = out.iter().position(|(_, p)| p.is_some()).unwrap();
+        let onset = out[first].0;
+        let ready = ready_after(&out, onset - 0.001, 64);
+        assert!(
+            (0.12..=0.2).contains(&ready),
+            "{sr}: ready after {ready:.3} s"
+        );
+        // Not ready means the center may still be off; once ready the ±40
+        // cent vibrato is judged green.
+        for (t, p) in &out {
+            if let Some(p) = p {
+                if p.center_ready && *t > onset + 0.2 {
+                    assert!(p.center_cents.abs() <= GREEN, "{sr}: {}", p.center_cents);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn center_readiness_restarts_on_a_new_note_and_after_a_pause() {
+    let sr = 48000.0;
+    let signal = synth(sr, 2.0, |t| {
+        let base = if t < 1.0 { 57.0 } else { 62.0 };
+        base + 0.4 * (TAU * 5.5 * t).sin()
+    });
+    let mut t = new_tracker(sr);
+    let out = track(&mut t, sr, &signal);
+    assert!(out
+        .iter()
+        .filter(|(time, _)| (0.6..1.0).contains(time))
+        .all(|(_, p)| p.is_some_and(|p| p.center_ready)));
+    let switch = out
+        .iter()
+        .position(|(_, p)| p.is_some_and(|p| p.stable_midi == 62))
+        .unwrap();
+    assert!(!out[switch].1.unwrap().center_ready);
+
+    let silence = [0.0f32; FRAME];
+    for _ in 0..6 {
+        assert!(t.process(&silence, 440.0).is_none());
+    }
+    let p = t.process(&signal[48000..48000 + FRAME], 440.0).unwrap();
+    assert!(!p.center_ready, "readiness survived a pause");
+}
+
+#[test]
+fn a_one_frame_center_window_is_always_ready() {
+    let signal = synth(48000.0, 0.5, vibrato(62.0, 0.4, 5.5));
+    let config = TrackerConfig {
+        center_window: 1,
+        ..TrackerConfig::default()
+    };
+    let mut tracker = PitchTracker::new(48000.0, FRAME, config);
+    let out = track(&mut tracker, 48000.0, &signal);
+    assert!(out.iter().filter_map(|(_, p)| *p).all(|p| p.center_ready));
+}
+
+#[test]
+fn a_vibrato_onset_never_shows_a_ready_center_in_the_red() {
+    // A vibrato centered on the note, entered at any phase (crest, trough,
+    // on the way): a ready center is never off by more than the default
+    // yellow zone (25 cents), so the zone cannot flash red at the onset.
+    const YELLOW: f32 = 25.0;
+    for sr in RATES {
+        for (depth, rate) in [(0.25, 4.5), (0.4, 4.5), (0.4, 5.5), (0.5, 6.5), (0.3, 6.5)] {
+            for phase in 0..24 {
+                let phase = phase as f64 / 24.0 * TAU;
+                let signal = after_silence(sr, move |t| {
+                    62.0 + depth * (TAU * rate * (t - 0.5) + phase).sin()
+                });
+                let out = track(&mut new_tracker(sr), sr, &signal);
+                for (t, p) in &out {
+                    if let Some(p) = p.filter(|p| p.center_ready) {
+                        assert!(
+                            p.center_cents.abs() <= YELLOW,
+                            "±{depth} at {rate} Hz, phase {phase:.2}, {sr}: {:+.0} cents ready at {t:.3}",
+                            p.center_cents
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

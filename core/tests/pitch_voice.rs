@@ -240,9 +240,9 @@ fn bass_c4_vibrato_note_and_centre() {
 
 /// Same clip: the displayed note must not leave C4 during the vibrato. One
 /// trough at ~1.81 s really dips to about 92 cents below C4 (offline YIN),
-/// past the hysteresis band, while the vibrato centre stays at C4 -5 cents.
+/// past the hysteresis band, while the vibrato centre stays at C4 -5 cents:
+/// the trough only grazes the band for a few frames of a swinging note.
 #[test]
-#[ignore = "vibrato trough crosses the hysteresis band; C4 flickers to B3"]
 fn bass_c4_vibrato_does_not_flicker() {
     let name = "bass_c4_vibrato.wav";
     let frames = track(&load(name));
@@ -327,10 +327,10 @@ fn ascending_scale_notes_in_order() {
 }
 
 /// Same clip, stricter: each note is displayed for at least 80 % of its
-/// settled frames. The flat A3 fails: the display stays on the passing G♯3
-/// because A3 -33 cents is only 67 cents above G♯3, inside the hysteresis band.
+/// settled frames. The flat A3 is the hard one: A3 -33 cents is only 67 cents
+/// above the passing G♯3, inside the hysteresis band, so the display must
+/// follow the center of the steady G♯3 there.
 #[test]
-#[ignore = "hysteresis holds a passing G#3 over a flat A3 for ~100 ms"]
 fn ascending_scale_each_note_settles() {
     let name = "baritone_scale_up.wav";
     let frames = track(&load(name));

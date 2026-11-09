@@ -83,3 +83,27 @@
 - **Why:** the drone e2e test failed in CI but not for the author (who most likely ran it without the WASM build, i.e. on the mock): with the real engine, the very first frame after the mic starts was shown as «до», and NoteDisplay keeps the last note, so one frame was enough. It was not a race – `setDrone` reaches the analyzer before the first frame. Chromium's fake capture (and real devices while they warm up) deliver exact zeros first, so the first frames are zeros followed by the drone. Such a gated frame both biases the MPM estimate (18 cents in a core test, outside the 15 cent tolerance) and leaves the step in the fit residual, periodic at the drone pitch, i.e. "voice". The same flaw showed up for real use: with a constant-amplitude fit, about 20 frames of the drone's 400 ms attack and 300 ms release were shown as a sung note (`drone_attack_and_release_are_never_a_note`). A linear envelope models those ramps exactly and volume changes closely; silent edges carry no sound and only occur at stream start or dropouts, where skipping the up to 4 partly silent frames (~45 ms) costs nothing.
 - **Trade-offs:** the fit is about 3.5 times more work (still only on drone-pitched frames). The envelope terms also absorb a small frequency offset of a pure sine, but a voice is recognized by its other harmonics, and every existing voice test passes unchanged. A real voice that starts right after digital silence is shown up to 4 hops later.
 - **Alternatives:** requiring several consecutive voiced frames in NoteDisplay before showing a new note (hides any single stray frame, but adds 1–2 hops of latency to every note against a 30 ms target and treats the symptom; not needed once the filter rejects every onset frame), relaxing the e2e test (would hide a real product bug), trimming the silent edges and fitting only the rest (the biased pitch estimate still fails the tolerance check).
+
+## 2026-11-09 – Latency: how it is measured, and the baseline
+
+- **Decision:** latency is measured in audio time by `core/tests/pitch_latency.rs`: a synthetic voice (4 harmonics, phase-continuous) steps between two notes; frames of 2048 every 512 samples at 48 kHz, four onset positions relative to the hop grid. A frame's result exists once its newest sample has arrived, so the delay of a frame is `frame end - onset`. Reported (mean / max over the alignments, ms), each "for good", i.e. from that frame on: (a) `midi` within 50 cents of the new note, (b) `stable_midi` is the new note, (c) the center within ±10 cents of it. Run it with `cargo test -p ktone-core --test pitch_latency -- --nocapture`. The web app adds the rest of the path, shown by the `?debug` overlay: input buffering (the worklet posts 512-sample blocks, so a frame is analyzed as soon as its last block arrives), message passing, the analysis itself, and up to one display frame (~8 ms on average at 60 Hz). `baseLatency`/`outputLatency` of the `AudioContext` describe the output side; browsers do not expose the input latency, typically 5–20 ms.
+- **Baseline** (frame 2048, 5-frame median, 30 cent hysteresis, 300 ms center; vibrato ±35 cents at 5.5 Hz):
+
+  | step | (a) midi | (b) stable | (c) center |
+  | --- | --- | --- | --- |
+  | bass semitone up (A2→B♭2) | 49 / 53 | 60 / 64 | 60 / 64 |
+  | bass fourth down | 63 / 67 | 63 / 67 | 63 / 67 |
+  | bass E2 → G2 | 60 / 64 | 60 / 64 | 60 / 64 |
+  | tenor semitone down | 49 / 53 | 60 / 64 | 60 / 64 |
+  | tenor third up | 57 / 61 | 57 / 61 | 57 / 61 |
+  | tenor fifth up | 60 / 64 | 60 / 64 | 60 / 64 |
+  | tenor octave up | 73 / 77 | 73 / 77 | 73 / 77 |
+  | soprano semitone up | 47 / 51 | 60 / 64 | 60 / 64 |
+  | soprano sixth down | 52 / 67 | 52 / 67 | 52 / 67 |
+  | bass semitone + vibrato | 47 / 51 | 124 / 128 | 263 / 267 |
+  | bass fifth + vibrato | 60 / 64 | 60 / 64 | 241 / 245 |
+  | tenor semitone + vibrato | 44 / 48 | 124 / 128 | 263 / 267 |
+  | tenor third + vibrato | 63 / 67 | 63 / 67 | 247 / 259 |
+  | soprano tone + vibrato | 57 / 61 | 124 / 128 | 263 / 267 |
+
+- **Reading:** the detector needs most of its 43 ms frame filled with the new note, and the 5-frame median adds two hops (21 ms), so a new pitch shows up 45–65 ms after the onset, the note 60 ms after it; an octave leap waits for the octave guard. With vibrato, a step of a tone or less is shown only after ~125 ms (a trough of the new note falls back into the hysteresis band of the old one), and the center needs most of its 300 ms window. Before browser overhead, the AGENTS.md budget (≤ 50 ms, aim 30 ms) is already exceeded by the core.

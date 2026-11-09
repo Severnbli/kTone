@@ -13,7 +13,15 @@ import { CentsGauge } from './components/CentsGauge';
 import { ClefGlyph, ClefPicker } from './components/ClefPicker';
 import { CLEF_LABEL_KEY } from './components/clefLabels';
 import { DroneControls } from './components/DroneControls';
-import { ChevronDownIcon, GearIcon, MicIcon, StopIcon, TargetIcon } from './components/icons';
+import { SOURCE_URL } from './buildInfo';
+import {
+  ChevronDownIcon,
+  GearIcon,
+  GitHubIcon,
+  MicIcon,
+  StopIcon,
+  TargetIcon,
+} from './components/icons';
 import { KeyPicker } from './components/KeyPicker';
 import { DebugOverlay } from './components/DebugOverlay';
 import { LevelMeter } from './components/LevelMeter';
@@ -259,6 +267,17 @@ function Main({
             <span className="chip-text chip-clef-name">{clefName}</span>
           </button>
         </div>
+        <a
+          className="icon-btn icon-btn-quiet header-source"
+          href={SOURCE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${t.sourceLink} ${t.opensNewTab}`}
+          title={t.sourceLink}
+          data-testid="header-source-link"
+        >
+          <GitHubIcon size={20} />
+        </a>
         <button
           type="button"
           className="icon-btn"

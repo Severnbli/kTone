@@ -91,6 +91,13 @@ export const ru = {
   levelHelp: 'Что показывает шкала',
   levelGateHelp: 'Чёрточка на шкале – порог распознавания: звук тише неё не анализируется.',
   namingNote: 'до-ре-ми – русские октавы (ля первой октавы), C-D-E – научная нотация (A4).',
+  // About section and source link
+  aboutTitle: 'О kTone',
+  aboutVersion: 'Версия {value}',
+  sourceCode: 'Исходный код на GitHub',
+  sourceLink: 'Исходный код kTone на GitHub',
+  license: 'Лицензия',
+  opensNewTab: '(откроется в новой вкладке)',
 } as const;
 
 export type Strings = { [K in keyof typeof ru]: string };
@@ -183,6 +190,13 @@ export const en: Strings = {
   levelHelp: 'What the meter shows',
   levelGateHelp: 'The tick on the meter is the detection threshold: quieter sound is not analyzed.',
   namingNote: 'do-re-mi uses fixed do; C-D-E uses scientific pitch notation (A4).',
+  // About section and source link
+  aboutTitle: 'About kTone',
+  aboutVersion: 'Version {value}',
+  sourceCode: 'Source code on GitHub',
+  sourceLink: 'kTone source code on GitHub',
+  license: 'License',
+  opensNewTab: '(opens in a new tab)',
 };
 
 export const STRINGS: Record<Lang, Strings> = { ru, en };

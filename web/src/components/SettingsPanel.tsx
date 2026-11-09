@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/context';
 import type { Lang } from '../i18n/strings';
 import type { DegreeStyle, NoteNaming } from '../music/naming';
 import { A4_MAX, A4_MIN, sanitizeSettings, type Settings, type Theme } from '../settings';
+import { About } from './About';
 import { Segmented, Switch } from './controls';
 import { DroneFields } from './DroneFields';
 import { MicDeviceSelect } from './MicDeviceSelect';
@@ -171,6 +172,8 @@ export function SettingsPanel({ settings, onChange, mediaDevices = browserMediaD
           ]}
         />
       </Group>
+
+      <About />
     </form>
   );
 }

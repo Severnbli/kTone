@@ -38,6 +38,49 @@ for (const [w, h] of [
   });
 }
 
+test('settings end with the source link and do not overflow at 360×640', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.goto('/');
+  // Phones keep the header clean: the source link lives in the settings only.
+  await expect(page.getByTestId('header-source-link')).toBeHidden();
+
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  const link = page.getByRole('link', { name: /Исходный код на GitHub/ });
+  await link.scrollIntoViewIfNeeded();
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', 'https://github.com/Severnbli/kTone');
+  await expect(link).toHaveAttribute('target', '_blank');
+  const box = (await link.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await expect(page.getByTestId('app-version')).toHaveText(/^Версия \d+\.\d+\.\d+ · \S+$/);
+
+  const size = await page.evaluate(() => ({
+    scrollW: document.documentElement.scrollWidth,
+    scrollH: document.documentElement.scrollHeight,
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
+  expect(size.scrollW).toBeLessThanOrEqual(size.w);
+  expect(size.scrollH).toBeLessThanOrEqual(size.h);
+  const sheetOverflowX = await page
+    .getByTestId('settings-panel')
+    .evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(sheetOverflowX).toBeLessThanOrEqual(0);
+});
+
+test('desktop header has a quiet source link next to the settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  const link = page.getByTestId('header-source-link');
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', 'https://github.com/Severnbli/kTone');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(link).toHaveAttribute('title', 'Исходный код kTone на GitHub');
+  const box = (await link.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+});
+
 test('touch targets in the header and the bottom bar are at least 44 px', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   await page.goto('/');

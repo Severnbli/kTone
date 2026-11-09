@@ -315,6 +315,35 @@ select {
   height: 22px;
 }
 
+/* Secondary header link: no fill or border until hovered. */
+.icon-btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-btn-quiet:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.icon-btn-quiet svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* The header source link is desktop only, phones find it in settings. */
+.header-source {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .header-source {
+    display: inline-grid;
+  }
+}
+
 .stage {
   flex: 1;
   min-height: 0;
@@ -1310,6 +1339,50 @@ input[type='number'] {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+.about {
+  gap: var(--space-2);
+}
+
+.about p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.about-version {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.about-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.about-link svg {
+  flex: none;
 }
 
 .field.zones {

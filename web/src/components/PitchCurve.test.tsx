@@ -7,13 +7,15 @@ import { PitchCurve } from './PitchCurve';
 
 /** Minimal 2D context that records the color and points of each stroke. */
 function fakeContext() {
-  const strokes: { color: string; ys: number[] }[] = [];
+  const strokes: { color: string; alpha: number; ys: number[] }[] = [];
   let ys: number[] = [];
   const ctx = {
     strokeStyle: '',
     fillStyle: '',
     lineWidth: 1,
     lineCap: 'butt',
+    lineJoin: 'miter',
+    globalAlpha: 1,
     font: '',
     textBaseline: 'alphabetic',
     setTransform: vi.fn(),
@@ -25,7 +27,9 @@ function fakeContext() {
     },
     moveTo: (_x: number, y: number) => ys.push(y),
     lineTo: (_x: number, y: number) => ys.push(y),
-    stroke: () => strokes.push({ color: ctx.strokeStyle, ys }),
+    stroke: () => strokes.push({ color: ctx.strokeStyle, alpha: ctx.globalAlpha, ys }),
+    arc: vi.fn(),
+    fill: vi.fn(),
   };
   return { ctx, strokes };
 }
@@ -56,7 +60,11 @@ describe('PitchCurve', () => {
     rafCallbacks = [];
   });
 
-  /** Renders the curve for frames of `[raw cents, center cents]` and returns the pitch segments. */
+  /**
+   * Renders the curve for frames of `[raw cents, center cents]` and returns the
+   * solid pitch strokes (each run of one zone color is also stroked once,
+   * translucent, for the glow).
+   */
   function draw(frames: [number, number][]) {
     const store = new PitchStore();
     render(
@@ -75,18 +83,24 @@ describe('PitchCurve', () => {
     const pending = rafCallbacks;
     rafCallbacks = [];
     pending.forEach((cb) => cb(0));
-    // Pitch segments are the only strokes drawn in a zone color.
+    // Pitch runs are the only strokes drawn in a zone color.
     const zoneColors: string[] = Object.values(ZONE_COLORS);
-    return fake.strokes.filter((s) => zoneColors.includes(s.color));
+    const pitch = fake.strokes.filter((s) => zoneColors.includes(s.color));
+    const glow = pitch.filter((s) => s.alpha < 1);
+    const solid = pitch.filter((s) => s.alpha === 1);
+    expect(glow.map((s) => s.color)).toEqual(solid.map((s) => s.color));
+    return solid;
   }
 
   it('colors segments by the vibrato center but draws the raw pitch', () => {
     const vibrato = Array.from({ length: 20 }, (_, i): [number, number] => [40 * Math.sin(i), 2]);
-    const segments = draw(vibrato);
-    expect(segments).toHaveLength(19);
-    expect(segments.every((s) => s.color === ZONE_COLORS.green)).toBe(true);
+    const runs = draw(vibrato);
+    // One green run through all 20 points.
+    expect(runs).toHaveLength(1);
+    expect(runs[0].color).toBe(ZONE_COLORS.green);
+    expect(runs[0].ys).toHaveLength(20);
     // The line itself still swings with the vibrato.
-    const ys = segments.flatMap((s) => s.ys);
+    const ys = runs[0].ys;
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(5);
   });
 
@@ -96,6 +110,41 @@ describe('PitchCurve', () => {
       [0, 40],
       [0, 40],
     ]);
-    expect(segments.map((s) => s.color)).toEqual([ZONE_COLORS.red, ZONE_COLORS.red]);
+    expect(segments.map((s) => s.color)).toEqual([ZONE_COLORS.red]);
+  });
+
+  it('starts a new run where the zone changes', () => {
+    const runs = draw([
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 40],
+      [0, 40],
+    ]);
+    expect(runs.map((s) => s.color)).toEqual([ZONE_COLORS.green, ZONE_COLORS.red]);
+    // The red run continues from the last green point, so the line has no gap.
+    expect(runs.map((s) => s.ys.length)).toEqual([3, 3]);
+  });
+
+  it('draws only note labels that fit, the tonic first', () => {
+    const store = new PitchStore();
+    render(
+      <PitchCurve
+        store={store}
+        keySpec={{ tonic: 'C', accidental: 0, mode: 'major' }}
+        naming="letter"
+        zones={{ green: 10, yellow: 25 }}
+      />,
+    );
+    act(() => store.push(frame(64.5, 0), 0)); // between E and F: both 1 semitone apart
+    rafCallbacks.splice(0).forEach((cb) => cb(0));
+    const calls = fake.ctx.fillText.mock.calls as [string, number, number][];
+    const ys = calls.map(([, , y]) => y).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(14);
+    for (const y of ys) {
+      expect(y).toBeGreaterThan(5);
+      expect(y).toBeLessThan(195);
+    }
+    expect(calls.map(([text]) => text)).toContain('C');
   });
 });

@@ -4,11 +4,16 @@ import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { pitchName, type NoteNaming } from '../music/naming';
 import { mod, scaleOf } from '../music/theory';
-import { classifyCents, type Zone, type ZoneThresholds } from '../zones';
+import { ZONE_COLORS, classifyCents, type Zone, type ZoneThresholds } from '../zones';
 
 const WINDOW_MS = 8000;
 const HALF_RANGE = 7; // semitones above and below the view center
-const LABEL_W = 34;
+const LABEL_W = 40;
+const FONT_PX = 11;
+/** Minimum vertical distance between two note labels. */
+const LABEL_GAP = FONT_PX + 5;
+/** Label priority by scale degree index: tonic, dominant, mediant, the rest. */
+const LABEL_PRIORITY = [0, 3, 2, 3, 1, 3, 3];
 /** Gaps longer than this break the line. */
 const MAX_GAP_MS = 120;
 
@@ -22,6 +27,7 @@ interface Props {
 interface Palette {
   grid: string;
   tonic: string;
+  tonicText: string;
   text: string;
   band: string;
   zones: Record<Zone, string>;
@@ -33,19 +39,43 @@ function readPalette(el: HTMLElement): Palette {
   return {
     grid: v('--curve-grid', '#8884'),
     tonic: v('--curve-tonic', '#888a'),
+    tonicText: v('--curve-tonic-text', '#888'),
     text: v('--muted', '#888'),
     band: v('--curve-band', '#22a55926'),
     zones: {
-      green: v('--zone-green', '#22a559'),
-      yellow: v('--zone-yellow', '#e0a800'),
-      red: v('--zone-red', '#e5484d'),
+      green: v('--zone-green', ZONE_COLORS.green),
+      yellow: v('--zone-yellow', ZONE_COLORS.yellow),
+      red: v('--zone-red', ZONE_COLORS.red),
     },
   };
+}
+
+interface Label {
+  y: number;
+  deg: number;
+}
+
+/**
+ * Note labels that fit: inside the canvas and at least LABEL_GAP apart, placed
+ * by priority (the tonic always wins), so «ми» and «фа» never overlap.
+ */
+function placeLabels(candidates: Label[], height: number, out: Label[]): Label[] {
+  out.length = 0;
+  candidates.sort((a, b) => LABEL_PRIORITY[a.deg] - LABEL_PRIORITY[b.deg]);
+  for (const c of candidates) {
+    if (c.y < FONT_PX / 2 + 1 || c.y > height - FONT_PX / 2 - 1) continue;
+    if (out.every((p) => Math.abs(p.y - c.y) >= LABEL_GAP)) out.push(c);
+  }
+  return out;
 }
 
 /**
  * Scrolling pitch curve drawn on a canvas from `store.history` in a
  * requestAnimationFrame loop. Never triggers React renders per frame.
+ *
+ * The line is drawn in runs of one zone color: each run is stroked twice,
+ * first wide and translucent (the "neon" glow), then thin and solid. This is
+ * far cheaper than `shadowBlur` and keeps the stroke count low.
  */
 export function PitchCurve({ store, keySpec, naming, zones }: Props) {
   const { t, lang } = useI18n();
@@ -86,6 +116,15 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
       dirty = true;
     };
     mq?.addEventListener?.('change', onScheme);
+    // The manual theme switch sets `data-theme` on <html>.
+    const themeObserver =
+      typeof MutationObserver !== 'undefined' ? new MutationObserver(onScheme) : null;
+    themeObserver?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    const candidates: Label[] = [];
+    const placed: Label[] = [];
 
     const draw = () => {
       raf = requestAnimationFrame(draw);
@@ -108,9 +147,8 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
 
       ctx.clearRect(0, 0, width, height);
 
-      // Key note grid with labels.
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.textBaseline = 'middle';
+      // Key note grid; labels only where they fit, the tonic emphasized.
+      candidates.length = 0;
       for (let m = Math.floor(c - HALF_RANGE); m <= Math.ceil(c + HALF_RANGE); m++) {
         const deg = scale.findIndex((n) => n.pc === mod(m, 12));
         if (deg < 0) continue;
@@ -121,8 +159,13 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         ctx.moveTo(LABEL_W, yy);
         ctx.lineTo(width, yy);
         ctx.stroke();
-        ctx.fillStyle = palette.text;
-        ctx.fillText(labels[deg], 2, yy);
+        candidates.push({ y: yy, deg });
+      }
+      ctx.textBaseline = 'middle';
+      for (const l of placeLabels(candidates, height, placed)) {
+        ctx.font = `${l.deg === 0 ? 700 : 400} ${FONT_PX}px system-ui, sans-serif`;
+        ctx.fillStyle = l.deg === 0 ? palette.tonicText : palette.text;
+        ctx.fillText(labels[l.deg], 4, l.y);
       }
 
       // Target band around the current stable note.
@@ -134,9 +177,24 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
       }
 
       // Raw pitch line (vibrato stays visible), colored by the accuracy of the
-      // vibrato center relative to the stable note.
-      ctx.lineWidth = 2.5;
+      // vibrato center relative to the stable note, in runs of one color.
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      let runZone: Zone | null = null;
+      let headX = NaN;
+      let headY = NaN;
+      let headZone: Zone = 'green';
+      const strokeRun = () => {
+        if (runZone === null) return;
+        ctx.strokeStyle = palette.zones[runZone];
+        ctx.globalAlpha = 0.22;
+        ctx.lineWidth = 7;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        runZone = null;
+      };
       let prevX = NaN;
       let prevY = NaN;
       let prevT = NaN;
@@ -146,6 +204,7 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         if (newest - time > WINDOW_MS) continue;
         const midi = h.midi[idx];
         if (!Number.isFinite(midi)) {
+          strokeRun();
           prevX = NaN;
           continue;
         }
@@ -153,15 +212,36 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         const yy = yOf(midi);
         if (Number.isFinite(prevX) && time - prevT <= MAX_GAP_MS) {
           const zone = classifyCents(h.centerCents[idx], zones);
-          ctx.strokeStyle = palette.zones[zone];
-          ctx.beginPath();
-          ctx.moveTo(prevX, prevY);
+          if (zone !== runZone) {
+            strokeRun();
+            runZone = zone;
+            ctx.beginPath();
+            ctx.moveTo(prevX, prevY);
+          }
           ctx.lineTo(xx, yy);
-          ctx.stroke();
+          headX = xx;
+          headY = yy;
+          headZone = zone;
+        } else {
+          strokeRun();
         }
         prevX = xx;
         prevY = yy;
         prevT = time;
+      }
+      strokeRun();
+
+      // A glowing dot at the newest point while a note is sounding.
+      if (latest && Number.isFinite(headX)) {
+        ctx.fillStyle = palette.zones[headZone];
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.arc(headX, headY, 8, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(headX, headY, 3.5, 0, 2 * Math.PI);
+        ctx.fill();
       }
     };
     raf = requestAnimationFrame(draw);
@@ -170,6 +250,7 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
       cancelAnimationFrame(raf);
       ro?.disconnect();
       mq?.removeEventListener?.('change', onScheme);
+      themeObserver?.disconnect();
     };
   }, [store, keySpec, naming, lang, zones]);
 

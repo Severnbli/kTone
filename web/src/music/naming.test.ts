@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  octaveShort,
   accidentalGlyph,
   formatDegree,
   formatNote,
@@ -79,6 +80,17 @@ describe('formatNote', () => {
   it('pitchName drops the octave', () => {
     expect(pitchName({ letter: 'B', accidental: -1 }, 'solfege', 'ru')).toBe('си♭');
     expect(pitchName({ letter: 'B', accidental: -1 }, 'letter', 'ru')).toBe('B♭');
+  });
+});
+
+describe('octaveShort', () => {
+  it('uses the Russian octave word for solfège and the note with its number otherwise', () => {
+    const c3 = { letter: 'C', accidental: 0, octave: 3 } as const;
+    expect(octaveShort(c3, 'solfege', 'ru')).toBe('малая');
+    expect(octaveShort({ ...c3, octave: 4 }, 'solfege', 'ru')).toBe('первая');
+    expect(octaveShort({ ...c3, octave: 2 }, 'solfege', 'ru')).toBe('большая');
+    expect(octaveShort({ letter: 'D', accidental: -1, octave: 3 }, 'letter', 'ru')).toBe('D♭3');
+    expect(octaveShort(c3, 'solfege', 'en')).toBe('do3');
   });
 });
 

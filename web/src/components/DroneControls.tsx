@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Drone, droneMidi } from '../audio/drone';
 import { documentVisibility, watchVisibility, type PageVisibility } from '../audio/lifecycle';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
-import { formatNote, type NoteNaming } from '../music/naming';
+import { formatNote, octaveShort, type NoteNaming } from '../music/naming';
 import { LETTER_PC, midiToHz } from '../music/theory';
-import { DRONE_OCTAVES, type Settings } from '../settings';
+import type { Settings } from '../settings';
+import { DroneFields } from './DroneFields';
 import { DroneLeakHint } from './DroneLeakHint';
+import { DroneIcon, PlayIcon, StopIcon } from './icons';
+import { Sheet } from './Sheet';
 
 interface Props {
   settings: Settings;
@@ -23,6 +27,8 @@ interface Props {
   store?: PitchStore;
   visibility?: PageVisibility;
   createDrone?: () => Drone;
+  /** Where status messages go (the toast area above the bottom bar); inline when absent. */
+  toastHost?: HTMLElement | null;
 }
 
 const defaultVisibility = documentVisibility();
@@ -39,16 +45,24 @@ export function DroneControls({
   store,
   visibility = defaultVisibility,
   createDrone = () => new Drone(),
+  toastHost,
 }: Props) {
   const { t, lang } = useI18n();
   const droneRef = useRef<Drone | null>(null);
   const [on, setOn] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const { key, a4Hz } = settings;
   const { volume, octave } = settings.drone;
   const midi = droneMidi(LETTER_PC[key.tonic], key.accidental, octave);
   const hz = midiToHz(midi, a4Hz);
-  const label = formatNote({ letter: key.tonic, accidental: key.accidental, octave }, naming, lang);
+  const tonicNote = { letter: key.tonic, accidental: key.accidental, octave };
+  const label = formatNote(tonicNote, naming, lang);
+  // «до · малая» fits the bottom bar on a 360 px phone; «C3» is short already.
+  const shortLabel =
+    naming === 'solfege' && lang === 'ru'
+      ? `${label.short} · ${octaveShort(tonicNote, naming, lang)}`
+      : label.full;
 
   useEffect(() => {
     if (on) droneRef.current?.setFrequency(hz);
@@ -109,58 +123,60 @@ export function DroneControls({
     }
   };
 
+  const leakHint = on && store ? <DroneLeakHint store={store} /> : null;
+  const toast = (node: ReactNode) => (toastHost ? createPortal(node, toastHost) : node);
+  const state = on ? t.droneStateOn : t.droneStateOff;
+
   return (
-    <section className="drone" data-testid="drone">
+    <div className="drone" data-testid="drone">
       <button
         type="button"
-        className={on ? 'btn drone-toggle on' : 'btn drone-toggle'}
-        aria-pressed={on}
-        onClick={toggle}
+        className={on ? 'dock-btn drone-open on' : 'dock-btn drone-open'}
+        data-testid="drone-open"
+        aria-haspopup="dialog"
+        aria-expanded={sheetOpen}
+        aria-label={`${t.drone} · ${label.full}, ${state}`}
+        onClick={() => setSheetOpen(true)}
       >
-        {on ? t.droneOn : t.droneOff}
-        <span className="drone-note"> · {label.full}</span>
+        <DroneIcon />
+        <span className="dock-btn-text">
+          <span className="dock-btn-title">{t.drone}</span>
+          <span className="dock-btn-sub">{shortLabel}</span>
+        </span>
       </button>
-      <div className="drone-row">
-        <label className="field inline">
-          <span>{t.droneVolume}</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            aria-label={t.droneVolume}
-            onChange={(e) => onChange({ octave, volume: Number(e.target.value) })}
-          />
-        </label>
-        <label className="field inline">
-          <span>{t.droneOctave}</span>
-          <select
-            aria-label={t.droneOctave}
-            value={octave}
-            onChange={(e) => onChange({ volume, octave: Number(e.target.value) })}
-          >
-            {DRONE_OCTAVES.map((o) => (
-              <option key={o} value={o}>
-                {
-                  formatNote(
-                    { letter: key.tonic, accidental: key.accidental, octave: o },
-                    naming,
-                    lang,
-                  ).full
-                }
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {interrupted && (
-        <p className="error" role="status" data-testid="drone-interrupted">
-          {t.droneInterrupted}
-        </p>
-      )}
-      <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
-      {on && store && <DroneLeakHint store={store} />}
-    </section>
+      <Sheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        title={t.drone}
+        testId="drone-sheet"
+      >
+        <button
+          type="button"
+          className={on ? 'drone-toggle on' : 'drone-toggle'}
+          aria-pressed={on}
+          data-testid="drone-toggle"
+          data-autofocus
+          onClick={toggle}
+        >
+          <span className="drone-toggle-icon">{on ? <StopIcon /> : <PlayIcon />}</span>
+          <span className="drone-toggle-label">
+            {t.drone} · {label.full}
+          </span>
+          <span className="drone-toggle-state" aria-hidden="true">
+            {state}
+          </span>
+        </button>
+        <DroneFields drone={settings.drone} keySpec={key} naming={naming} onChange={onChange} />
+        <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
+        {leakHint}
+      </Sheet>
+      {interrupted &&
+        toast(
+          <p className="toast error" role="status" data-testid="drone-interrupted">
+            {t.droneInterrupted}
+          </p>,
+        )}
+      {!sheetOpen && leakHint && toast(leakHint)}
+    </div>
   );
 }

@@ -28,7 +28,14 @@ export default tseslint.config(
     rules: { 'react-refresh/only-export-components': 'off' },
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.mjs', '*.config.ts', 'e2e/**/*.ts', 'sw/**/*.ts'],
+    files: [
+      'eslint.config.js',
+      'scripts/**/*.mjs',
+      '*.config.ts',
+      'e2e/**/*.ts',
+      'sw/**/*.ts',
+      'seo/**/*.ts',
+    ],
     languageOptions: { globals: globals.node },
   },
   {

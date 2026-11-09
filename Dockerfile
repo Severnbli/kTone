@@ -30,6 +30,9 @@ COPY --chown=node:node core core
 COPY --chown=node:node wasm wasm
 COPY --chown=node:node scripts scripts
 COPY --chown=node:node web web
+# Public origin for canonical links, Open Graph, robots.txt and sitemap.xml
+# (default https://ktone.severnbli.dev, see web/seo/site.ts).
+ARG VITE_SITE_URL
 RUN ./scripts/build-wasm.sh && pnpm -C web build
 
 # --- runtime: static files served by nginx ----------------------------------

@@ -7,6 +7,12 @@ import { DEFAULT_SETTINGS } from '../settings';
 import { FakeAudioContext, fakeVisibility, flush } from '../test/fakes';
 import { DroneControls } from './DroneControls';
 
+/** Opens the drone sheet from the bottom-bar button and returns its on/off toggle. */
+function openSheet() {
+  fireEvent.click(screen.getByTestId('drone-open'));
+  return screen.getByTestId('drone-toggle');
+}
+
 describe('DroneControls', () => {
   it('labels the tonic in the selected octave and toggles', () => {
     const onChange = vi.fn();
@@ -17,14 +23,19 @@ describe('DroneControls', () => {
         onChange={onChange}
       />,
     );
-    const btn = screen.getByRole('button');
+    const open = screen.getByTestId('drone-open');
+    expect(open).toHaveAccessibleName('Бурдон · ре малой октавы, выключен');
+    expect(open).toHaveTextContent('ре · малая');
+    const btn = openSheet();
+    expect(screen.getByRole('dialog', { name: 'Бурдон' })).toBeInTheDocument();
     expect(btn).toHaveTextContent('ре малой октавы');
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(btn); // jsdom has no AudioContext: start is a no-op
     expect(btn).toHaveAttribute('aria-pressed', 'true');
+    expect(open).toHaveAccessibleName('Бурдон · ре малой октавы, звучит');
     expect(screen.getByText(/наушники/)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Октава'), { target: { value: '4' } });
+    fireEvent.click(screen.getByLabelText('ре первой октавы'));
     expect(onChange).toHaveBeenLastCalledWith({ volume: 0.3, octave: 4 });
     fireEvent.change(screen.getByLabelText('Громкость'), { target: { value: '0.8' } });
     expect(onChange).toHaveBeenLastCalledWith({ volume: 0.8, octave: 3 });
@@ -43,7 +54,7 @@ describe('DroneControls', () => {
       />,
     );
     expect(onPlayingChange).toHaveBeenLastCalledWith(null);
-    const btn = screen.getByRole('button');
+    const btn = openSheet();
     fireEvent.click(btn);
     // C3 at A4 = 440.
     expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(130.81, 2));
@@ -98,7 +109,7 @@ describe('DroneControls', () => {
           createDrone={() => new Drone(() => ctx.asAudioContext())}
         />,
       );
-      const btn = screen.getByRole('button');
+      const btn = openSheet();
       return { ctx, visibility, onPlayingChange, btn };
     }
 

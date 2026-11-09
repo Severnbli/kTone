@@ -1,26 +1,13 @@
 // Exercises the real Rust engine through the TS adapter. Skipped when the WASM
 // package has not been built (`pnpm wasm`).
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { wrapWasm, type WasmModule } from './index';
 import type { Analyzer, AnalyzerSettings } from './types';
 import { GATE_MARGIN_DB, GATE_MAX_DBFS, GATE_MIN_DBFS } from './noiseFloor';
 import { feedNoise } from '../test/noise';
-
-// Vitest runs from web/; jsdom gives modules http URLs, so resolve from cwd.
-const pkgDir = `${resolve('src/wasm-pkg')}/`;
-const hasWasm = existsSync(`${pkgDir}ktone_wasm_bg.wasm`);
+import { hasWasm, loadWasmAnalyzer } from '../test/wasm';
 
 const SR = 48_000;
-
-async function load(): Promise<Analyzer> {
-  const mod = (await import(/* @vite-ignore */ `${pkgDir}ktone_wasm.js`)) as WasmModule & {
-    initSync: (opts: { module: BufferSource }) => unknown;
-  };
-  mod.initSync({ module: readFileSync(`${pkgDir}ktone_wasm_bg.wasm`) });
-  return wrapWasm(mod, SR);
-}
+const load = () => loadWasmAnalyzer(SR);
 
 function feedSine(analyzer: Analyzer, freq: number) {
   const frame = new Float32Array(analyzer.frameSize);

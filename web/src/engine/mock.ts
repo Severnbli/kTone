@@ -2,8 +2,9 @@
 // fallback. Pitch detection is a plain YIN (cumulative mean normalized
 // difference); spelling is simple and key-aware: diatonic notes use the key's
 // spelling, chromatic notes use sharps in sharp keys (and C/a) and flats in flat
-// keys. The drone filter is a port of the Rust one (see `droneCheck.ts`), and
-// so is the automatic noise gate (see `noiseFloor.ts`).
+// keys. The smoothing and note switching (`noteTracker.ts`), the drone filter
+// (`droneCheck.ts`) and the automatic noise gate (`noiseFloor.ts`) are ports
+// of the Rust core.
 
 import type {
   Analyzer,
@@ -15,9 +16,10 @@ import type {
   SpelledNote,
 } from './types';
 import { ALL_KEYS, DEFAULT_KEY } from '../music/keys';
-import { DroneChecker } from './droneCheck';
+import { DRONE_CONFIRM_CENTS, DroneChecker, nearDrone } from './droneCheck';
+import { NoteTracker } from './noteTracker';
 import { NoiseFloor } from './noiseFloor';
-import { LETTER_PC, hzToMidi, keySignature, mod, scaleOf, staffStepFor } from '../music/theory';
+import { LETTER_PC, keySignature, mod, scaleOf, staffStepFor } from '../music/theory';
 
 export const FRAME_SIZE = 2048;
 export const HOP_SIZE = 512;
@@ -25,18 +27,12 @@ export const HOP_SIZE = 512;
 const MIN_HZ = 60;
 const MAX_HZ = 1500;
 const YIN_THRESHOLD = 0.15;
-/** Extra cents past the half-semitone boundary before the stable note changes. */
-const HYSTERESIS_CENTS = 15;
-/** Vibrato-center window, as in the Rust core (`CENTER_WINDOW_SECS`). */
-const CENTER_WINDOW_SECS = 0.3;
-/** Unpitched frames in a row after which the center history is dropped. */
-const GAP_RESET_FRAMES = 4;
 /**
- * The center is ready after 3/5 of its window, or after this many frames
- * within `CENTER_READY_SPREAD` semitones (as in the Rust core).
+ * After drone leakage in the last 0.5 s, a pitched frame near the drone is
+ * shown only once this many came in a row (`drone_confirm` in the core).
  */
-const CENTER_READY_MIN_FRAMES = 6;
-const CENTER_READY_SPREAD = 0.08;
+const DRONE_CONFIRM = 5;
+const DRONE_LEAK_MEMORY_SECS = 0.5;
 /** Samples at or below this magnitude are digital silence (as in the Rust core). */
 const DIGITAL_SILENCE = 1e-6;
 /**
@@ -154,14 +150,12 @@ class MockAnalyzer implements Analyzer {
   readonly frameSize = FRAME_SIZE;
   readonly hopSize = HOP_SIZE;
   private settings: AnalyzerSettings = { key: DEFAULT_KEY, clef: 'treble', a4Hz: 440 };
-  private stableMidi: number | null = null;
   private readonly diff = new Float32Array(FRAME_SIZE / 2);
-  /** Ring of recent MIDI values of the current note for the vibrato center. */
-  private readonly centerHist: Float64Array;
-  private centerLen = 0;
-  private centerPos = 0;
-  private centerReady = false;
-  private invalidRun = 0;
+  private readonly tracker: NoteTracker;
+  /** Frames since drone leakage was last seen, and drone-pitched frames in a row. */
+  private sinceLeak = Infinity;
+  private droneVoiceRun = 0;
+  private readonly droneLeakMemory: number;
   private droneHz = 0;
   private droneFilter = false;
   private readonly droneChecker: DroneChecker;
@@ -171,15 +165,12 @@ class MockAnalyzer implements Analyzer {
   constructor(private readonly sampleRate: number) {
     this.droneChecker = new DroneChecker(sampleRate, FRAME_SIZE);
     this.noise = new NoiseFloor(sampleRate, HOP_SIZE);
-    const frames = Math.round((CENTER_WINDOW_SECS * sampleRate) / HOP_SIZE);
-    this.centerHist = new Float64Array(Math.max(1, Math.min(255, frames || 1)));
+    this.tracker = new NoteTracker(sampleRate, HOP_SIZE);
+    this.droneLeakMemory = Math.round((DRONE_LEAK_MEMORY_SECS * sampleRate) / HOP_SIZE);
   }
 
+  /** A new A4 keeps all state: the tracker re-decides the note on the next frame. */
   configure(settings: AnalyzerSettings): void {
-    if (settings.a4Hz !== this.settings.a4Hz) {
-      this.stableMidi = null;
-      this.clearCenter();
-    }
     this.settings = { ...settings, key: { ...settings.key } };
   }
 
@@ -196,53 +187,9 @@ class MockAnalyzer implements Analyzer {
     this.droneFilter = filter;
   }
 
-  private clearCenter(): void {
-    this.centerLen = 0;
-    this.centerPos = 0;
-    this.centerReady = false;
-  }
-
   private unpitched(): null {
-    this.invalidRun++;
-    if (this.invalidRun >= GAP_RESET_FRAMES) this.clearCenter();
+    this.tracker.invalid();
     return null;
-  }
-
-  /** See `PitchFrame.centerReady`; latched until the note changes. */
-  private isCenterReady(): boolean {
-    const len = this.centerLen;
-    const cap = this.centerHist.length;
-    if (!this.centerReady && 5 * len >= 3 * cap) this.centerReady = true;
-    if (!this.centerReady && len >= CENTER_READY_MIN_FRAMES) {
-      const oldest = (this.centerPos - len + cap) % cap;
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (let i = 0; i < len; i++) {
-        const v = this.centerHist[(oldest + i) % cap];
-        lo = Math.min(lo, v);
-        hi = Math.max(hi, v);
-      }
-      this.centerReady = hi - lo <= CENTER_READY_SPREAD;
-    }
-    return this.centerReady;
-  }
-
-  /** Triangular-weighted mean of the center ring (same as the Rust core). */
-  private pushCenter(midi: number): number {
-    const cap = this.centerHist.length;
-    this.centerHist[this.centerPos] = midi;
-    this.centerPos = (this.centerPos + 1) % cap;
-    this.centerLen = Math.min(this.centerLen + 1, cap);
-    const len = this.centerLen;
-    const oldest = (this.centerPos - len + cap) % cap;
-    let sum = 0;
-    let weights = 0;
-    for (let i = 0; i < len; i++) {
-      const w = Math.min(i + 1, len - i);
-      sum += w * this.centerHist[(oldest + i) % cap];
-      weights += w;
-    }
-    return sum / weights;
   }
 
   process(frame: Float32Array): PitchFrame | null {
@@ -250,6 +197,10 @@ class MockAnalyzer implements Analyzer {
       throw new Error(`frame.length must be ${this.frameSize}, got ${frame.length}`);
     }
     this.droneLeak = false;
+    this.sinceLeak++;
+    // Set again below for a drone-pitched frame, so any other frame breaks the run.
+    const voiceRun = this.droneVoiceRun;
+    this.droneVoiceRun = 0;
     let energy = 0;
     for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
     const rms = Math.sqrt(energy / frame.length);
@@ -263,33 +214,32 @@ class MockAnalyzer implements Analyzer {
     const clarity = pitch[1];
     if (this.droneHz > 0) {
       const verdict = this.droneChecker.check(frame, frequencyHz, this.droneHz);
+      // A glitch in the input stream makes the leaking drone look like voice
+      // while it is in the frame (4 hops): see `drone_confirm` in the core.
+      if (verdict !== 'drone' && nearDrone(frequencyHz, this.droneHz, DRONE_CONFIRM_CENTS)) {
+        this.droneVoiceRun = voiceRun + 1;
+        const recentLeak = this.sinceLeak <= this.droneLeakMemory;
+        if (this.droneFilter && recentLeak && this.droneVoiceRun < DRONE_CONFIRM) {
+          return this.unpitched();
+        }
+      }
       if (verdict === 'drone') {
         this.droneLeak = true;
+        this.sinceLeak = 0;
         if (this.droneFilter) return this.unpitched();
       } else if (verdict === 'voiceOctaveUp' && this.droneFilter && 2 * frequencyHz <= MAX_HZ) {
         frequencyHz *= 2;
       }
     }
-    this.invalidRun = 0;
-    const midi = hzToMidi(frequencyHz, this.settings.a4Hz);
-    if (
-      this.stableMidi === null ||
-      Math.abs(midi - this.stableMidi) * 100 > 50 + HYSTERESIS_CENTS
-    ) {
-      const next = Math.round(midi);
-      // A new note: do not drag the center from the previous one.
-      if (next !== this.stableMidi) this.clearCenter();
-      this.stableMidi = next;
-    }
-    const stableMidi = this.stableMidi;
-    const centerMidi = this.pushCenter(midi);
+    const tracked = this.tracker.push(frequencyHz, this.settings.a4Hz);
+    const { stableMidi, midi, centerMidi } = tracked;
     const note = this.spell(stableMidi);
     const degree = degreeInKey(stableMidi, this.settings.key);
     return {
-      frequencyHz,
+      frequencyHz: tracked.frequencyHz,
       midi,
       stableMidi,
-      cents: (midi - stableMidi) * 100,
+      cents: tracked.cents,
       clarity,
       rms,
       note,
@@ -297,8 +247,8 @@ class MockAnalyzer implements Analyzer {
       inKey: degree !== null,
       staffStep: staffStepFor(note, this.settings.clef),
       centerMidi,
-      centerCents: (centerMidi - stableMidi) * 100,
-      centerReady: this.isCenterReady(),
+      centerCents: tracked.centerCents,
+      centerReady: tracked.centerReady,
     };
   }
 
@@ -315,9 +265,10 @@ class MockAnalyzer implements Analyzer {
   }
 
   dispose(): void {
-    this.stableMidi = null;
+    this.tracker.reset();
     this.droneLeak = false;
-    this.clearCenter();
+    this.sinceLeak = Infinity;
+    this.droneVoiceRun = 0;
     this.noise.reset();
   }
 }

@@ -97,13 +97,16 @@ describe('mock analyzer', () => {
   });
 
   it('applies hysteresis between neighboring notes', async () => {
+    // The full switching rule is checked against the core in parity.test.ts.
     const a = await createMockAnalyzer(SR);
-    a.process(sine(440));
-    // +55 cents: past the half-semitone line but inside the hysteresis band.
-    const f = a.process(sine(440 * Math.pow(2, 55 / 1200)))!;
-    expect(f.stableMidi).toBe(69);
-    const g = a.process(sine(440 * Math.pow(2, 75 / 1200)))!;
-    expect(g.stableMidi).toBe(70);
+    for (let i = 0; i < 30; i++) a.process(sine(440));
+    // +65 cents: past the half-semitone line but inside the hysteresis band.
+    for (let i = 0; i < 3; i++) {
+      expect(a.process(sine(440 * Math.pow(2, 65 / 1200)))!.stableMidi).toBe(69);
+    }
+    // +85 cents: past the band, on a settled straight note it switches at once.
+    expect(a.process(sine(440 * Math.pow(2, 85 / 1200)))!.stableMidi).toBe(69);
+    expect(a.process(sine(440 * Math.pow(2, 85 / 1200)))!.stableMidi).toBe(70);
   });
 
   it('returns null for silence and noise', async () => {
@@ -290,6 +293,8 @@ describe('mock analyzer', () => {
       a.setDrone(D3, true);
       for (const midi of [50, 62, 55]) {
         const hz = 440 * 2 ** ((midi - 69) / 12);
+        // A pause between the notes, so the octave guard does not hold the leap.
+        for (let i = 0; i < 4; i++) a.process(new Float32Array(2048));
         const out = runFrames(a, (at) => voiceFrame(hz, at));
         expect([midi, out.map(({ f }) => f?.stableMidi)]).toEqual([midi, Array(12).fill(midi)]);
         expect(out.some(({ leak }) => leak)).toBe(false);

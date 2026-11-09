@@ -77,6 +77,33 @@ describe('PitchEngine', () => {
     await engine.stop();
   });
 
+  it('keeps the drone across a mic restart', async () => {
+    const mic = fakeMic();
+    const analyzers: Analyzer[] = [];
+    const engine = new PitchEngine(new PitchStore(), {
+      factory: async (sr) => {
+        const a = await createMockAnalyzer(sr);
+        vi.spyOn(a, 'setDrone');
+        analyzers.push(a);
+        return a;
+      },
+      startMic: mic.startMic,
+      now: () => 0,
+    });
+    await engine.start(settings);
+    engine.setDrone(220, false);
+    // A device change and a failed resume both open a new session and analyzer.
+    await engine.setDevice('usb-1');
+    mic.setResumeWorks(false);
+    mic.setState('suspended');
+    await flush();
+    await engine.resume();
+    expect(analyzers).toHaveLength(3);
+    expect(analyzers[1].setDrone).toHaveBeenLastCalledWith(220, false);
+    expect(analyzers[2].setDrone).toHaveBeenLastCalledWith(220, false);
+    await engine.stop();
+  });
+
   it('measures the input level of every frame, pitched or not', async () => {
     const mic = fakeMic();
     const levels = new LevelStore();

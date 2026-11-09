@@ -161,7 +161,9 @@ fn drone_filter_ignores_the_drone_but_not_a_voice() {
 
     a.set_drone(220.0, true);
     assert_eq!(count(&mut a, 220.0, &drone), (0, 20));
-    assert_eq!(count(&mut a, 220.0, &voice), (20, 0));
+    // Right after the leak, a voice on the drone pitch must hold for 5
+    // frames before it is shown (a stream glitch lasts 4).
+    assert_eq!(count(&mut a, 220.0, &voice), (16, 0));
 
     a.set_drone(220.0, false);
     assert_eq!(count(&mut a, 220.0, &drone), (20, 20));

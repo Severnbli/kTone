@@ -53,7 +53,13 @@
 //! frame is the drone leaking from the speakers into the mic and is treated as
 //! unpitched. If the residual repeats at half the period, the singer is an
 //! octave above the drone (the mixture fooled the detector) and the pitch is
-//! doubled. See `docs/decisions.md` for the thresholds.
+//! doubled. A glitch in the input stream (a lost, repeated or zeroed block
+//! while the device is starved) is a phase jump of the leaking drone that one
+//! fit cannot explain, so it looks like voice for as long as it is inside the
+//! frame; therefore, while the drone has been heard leaking recently, a voice
+//! on the drone pitch is shown only after
+//! [`TrackerConfig::drone_confirm`] such frames in a row. See
+//! `docs/decisions.md` for the thresholds.
 //!
 //! Automatic noise gate: the RMS gate follows the room. The tracker estimates
 //! the background noise floor with minimum statistics: the quietest frame RMS
@@ -148,6 +154,11 @@ pub const SHORT_WINDOW_MAX_JUMP: f64 = 1.5;
 /// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
 pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
 /// Length of the noise-floor window (minimum statistics), see the module docs.
+/// After drone leakage, how long (seconds) a drone-pitched frame judged as
+/// voice still needs [`TrackerConfig::drone_confirm`] such frames in a row.
+pub const DRONE_LEAK_MEMORY_SECS: f32 = 0.5;
+const DEFAULT_DRONE_LEAK_MEMORY: usize = 47;
+const MAX_DRONE_FRAMES: usize = 4096;
 pub const NOISE_WINDOW_SECS: f32 = 1.5;
 /// Unpitched audio needed before the floor replaces `rms_threshold`.
 pub const NOISE_SETTLE_SECS: f32 = 0.5;
@@ -179,6 +190,13 @@ const OCTAVE_UP_CLARITY: f64 = 0.9;
 /// Frames within this many cents of the drone (or an octave of it) are fitted;
 /// only those within `drone_tolerance_cents` can be rejected.
 const OCTAVE_UP_WINDOW_CENTS: f64 = 60.0;
+
+/// Pitched frames within this many cents of the drone (or an octave of it)
+/// need [`TrackerConfig::drone_confirm`] frames in a row after drone leakage:
+/// a glitch can pull the detected pitch of the leaking drone well past
+/// [`OCTAVE_UP_WINDOW_CENTS`] (about 65 cents for a lost 300-sample block at
+/// C3).
+const DRONE_CONFIRM_CENTS: f64 = 100.0;
 /// Partials above this fraction of the sample rate are not fitted.
 const MAX_PARTIAL_FRACTION: f64 = 0.45;
 /// Polynomial terms of each partial's amplitude in the drone fit: 2 lets the
@@ -670,6 +688,17 @@ pub struct TrackerConfig {
     /// this much ([`Residual::clarity`]), i.e. it is not just noise. Otherwise
     /// the frame is drone leakage.
     pub drone_voice_clarity: f32,
+    /// With the filter on and drone leakage heard in the last
+    /// `drone_leak_memory` frames, a drone-pitched frame judged as voice is
+    /// shown only once this many such frames came in a row (clamped to
+    /// `1..=4096`). A glitch in the input stream (a lost, repeated or silent
+    /// block) is a phase jump that one drone fit cannot explain, and it stays
+    /// in the frame for `frame / hop` frames; the default 5 outlasts that at
+    /// frame 2048, hop 512.
+    pub drone_confirm: usize,
+    /// See `drone_confirm` (frames, clamped to `0..=4096`).
+    /// [`TrackerConfig::for_hop`] sizes it to [`DRONE_LEAK_MEMORY_SECS`].
+    pub drone_leak_memory: usize,
 }
 
 impl TrackerConfig {
@@ -690,6 +719,7 @@ impl TrackerConfig {
             config.noise_window = frames(NOISE_WINDOW_SECS);
             config.noise_settle = frames(NOISE_SETTLE_SECS);
             config.noise_holdoff = frames(NOISE_HOLDOFF_SECS);
+            config.drone_leak_memory = frames(DRONE_LEAK_MEMORY_SECS);
         }
         config
     }
@@ -702,7 +732,8 @@ impl Default for TrackerConfig {
     /// drone check within ±15 cents; drone-pitched frames need 0.1 % (-30 dB)
     /// of periodic non-drone energy with residual clarity 0.5 to count as voice;
     /// automatic gate on, with a 1.5 s noise window, 0.5 s settle and 0.3 s
-    /// hold-off.
+    /// hold-off; after drone leakage, drone-pitched voice frames need 5 in a
+    /// row for 0.5 s.
     fn default() -> Self {
         Self {
             min_hz: 70.0,
@@ -721,6 +752,8 @@ impl Default for TrackerConfig {
             drone_tolerance_cents: 15.0,
             drone_voice_energy: 0.001,
             drone_voice_clarity: 0.5,
+            drone_confirm: 5,
+            drone_leak_memory: DEFAULT_DRONE_LEAK_MEMORY,
         }
     }
 }
@@ -757,9 +790,9 @@ pub struct TrackedPitch {
 /// Outcome of [`PitchTracker::drone_check`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DroneCheck {
-    /// No drone set.
+    /// No drone set, or the pitch is not near the drone or one of its octaves.
     Off,
-    /// Not drone leakage (or not checked: the pitch is not the drone's).
+    /// Checked, not drone leakage.
     Voice,
     /// Not drone leakage; the voice is an octave above the detected pitch.
     VoiceOctaveUp,
@@ -811,6 +844,10 @@ pub struct PitchTracker {
     drone_hz: f64,
     drone_filter: bool,
     drone_leak: bool,
+    /// Frames since drone leakage was last seen (saturating).
+    since_leak: usize,
+    /// Drone-pitched frames judged as voice in a row, see `drone_confirm`.
+    drone_voice_run: usize,
     noise: NoiseFloor,
 }
 
@@ -945,6 +982,8 @@ impl PitchTracker {
             drone_hz: 0.0,
             drone_filter: false,
             drone_leak: false,
+            since_leak: usize::MAX,
+            drone_voice_run: 0,
             noise: NoiseFloor::new(&config),
         }
     }
@@ -1009,6 +1048,9 @@ impl PitchTracker {
     /// non-positive / non-finite `a4_hz`. Never panics.
     pub fn process(&mut self, frame: &[f32], a4_hz: f32) -> Option<TrackedPitch> {
         self.drone_leak = false;
+        self.since_leak = self.since_leak.saturating_add(1);
+        // Reset below for every drone-pitched voice frame, so any other frame breaks the run.
+        let voice_run = std::mem::take(&mut self.drone_voice_run);
         if frame.len() != self.frame_size || !(a4_hz.is_finite() && a4_hz > 0.0) {
             return self.invalid();
         }
@@ -1043,9 +1085,21 @@ impl PitchTracker {
             return self.invalid();
         }
         let mut est = est;
-        match self.drone_check(est, frame) {
+        let check = self.drone_check(est, frame);
+        if check != DroneCheck::Drone
+            && self.near_drone(est.frequency_hz as f64, DRONE_CONFIRM_CENTS)
+        {
+            self.drone_voice_run = voice_run.saturating_add(1);
+            let memory = self.config.drone_leak_memory.min(MAX_DRONE_FRAMES);
+            let confirm = self.config.drone_confirm.clamp(1, MAX_DRONE_FRAMES);
+            if self.drone_filter && self.since_leak <= memory && self.drone_voice_run < confirm {
+                return self.invalid();
+            }
+        }
+        match check {
             DroneCheck::Drone => {
                 self.drone_leak = true;
+                self.since_leak = 0;
                 if self.drone_filter {
                     return self.invalid();
                 }
@@ -1102,6 +1156,8 @@ impl PitchTracker {
         self.noise.reset();
         self.invalid_run = 0;
         self.drone_leak = false;
+        self.since_leak = usize::MAX;
+        self.drone_voice_run = 0;
     }
 
     /// Runs the detector on the newest half of the frame when the current
@@ -1254,12 +1310,12 @@ impl PitchTracker {
         if drone <= 0.0 {
             return DroneCheck::Off;
         }
+        if !self.near_drone(f0, OCTAVE_UP_WINDOW_CENTS) {
+            return DroneCheck::Off;
+        }
         let cents = 1200.0 * (f0 / drone).log2();
         let octaves = (cents / 1200.0).round();
         let off = (cents - 1200.0 * octaves).abs();
-        if !(octaves.abs() <= 1.0 && off <= OCTAVE_UP_WINDOW_CENTS) {
-            return DroneCheck::Voice;
-        }
         // The check is tuned on, and reads the residual of, the full frame.
         if !self.full_frame && self.mpm.detect(frame).is_none() {
             return DroneCheck::Voice;
@@ -1301,6 +1357,17 @@ impl PitchTracker {
         } else {
             DroneCheck::Voice
         }
+    }
+
+    /// Whether `f0` is within `cents` of the drone or one octave of it
+    /// (false without a drone).
+    fn near_drone(&self, f0: f64, cents: f64) -> bool {
+        if self.drone_hz <= 0.0 {
+            return false;
+        }
+        let c = 1200.0 * (f0 / self.drone_hz).log2();
+        let octaves = (c / 1200.0).round();
+        octaves.abs() <= 1.0 && (c - 1200.0 * octaves).abs() <= cents
     }
 
     fn clear_state(&mut self) {

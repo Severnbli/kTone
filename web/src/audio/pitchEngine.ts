@@ -12,6 +12,7 @@
 // - input device changed while active -> the mic session is restarted on it.
 
 import type { Analyzer, AnalyzerFactory, AnalyzerSettings } from '../engine/types';
+import type { DebugStats } from './debugStats';
 import { FrameScheduler } from './frameScheduler';
 import type { LevelStore } from './level';
 import { documentVisibility, watchVisibility, type PageVisibility } from './lifecycle';
@@ -28,6 +29,8 @@ export interface EngineDeps {
   backgroundStopMs?: number;
   /** Receives the input level of every analysis frame, pitched or not. */
   levels?: LevelStore;
+  /** Receives per-frame analysis times and scheduler drops (the `?debug` overlay). */
+  debug?: DebugStats;
 }
 
 export type EngineStatus = 'idle' | 'running' | 'suspended';
@@ -105,12 +108,22 @@ export class PitchEngine {
     this.store.reset();
     const levels = this.deps.levels;
     levels?.reset();
-    scheduler = new FrameScheduler(analyzer.frameSize, analyzer.hopSize, (frame) => {
-      const now = this.deps.now();
-      const result = analyzer.process(frame);
-      this.store.push(result, now, analyzer.droneLeak);
-      levels?.push(frame, result !== null, now);
-    });
+    const debug = this.deps.debug;
+    debug?.start(mic.sampleRate, analyzer.frameSize, analyzer.hopSize, () =>
+      mic.latency ? mic.latency() : { baseLatency: null, outputLatency: null },
+    );
+    const frames: FrameScheduler = new FrameScheduler(
+      analyzer.frameSize,
+      analyzer.hopSize,
+      (frame) => {
+        const now = this.deps.now();
+        const result = analyzer.process(frame);
+        if (debug) debug.record(this.deps.now() - now, frames.dropped);
+        this.store.push(result, now, analyzer.droneLeak);
+        levels?.push(frame, result !== null, now);
+      },
+    );
+    scheduler = frames;
     this.unwatch = watchVisibility(this.deps.visibility ?? documentVisibility(), {
       hiddenTimeoutMs: this.deps.backgroundStopMs,
       onHiddenTimeout: () => void this.halt('background'),

@@ -15,6 +15,24 @@ import {
 } from './test/fakes';
 
 describe('App', () => {
+  it('shows the debug overlay only with ?debug', async () => {
+    const { unmount } = render(<App factory={createMockAnalyzer} startMic={fakeMic().startMic} />);
+    expect(screen.queryByTestId('debug-overlay')).toBeNull();
+    unmount();
+
+    window.history.replaceState(null, '', '/?debug');
+    try {
+      const mic = fakeMic();
+      render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);
+      const overlay = screen.getByTestId('debug-overlay');
+      fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
+      await screen.findByRole('button', { name: 'Стоп' });
+      act(() => mic.feedSine(440, 2048 + 512));
+      await waitFor(() => expect(overlay).toHaveTextContent('dropped 0 / 2 frames'));
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
   it('starts the mic, shows the sung note, and respells on key change', async () => {
     const mic = fakeMic();
     render(<App factory={createMockAnalyzer} startMic={mic.startMic} />);

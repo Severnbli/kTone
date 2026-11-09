@@ -49,6 +49,13 @@ export class FrameScheduler {
   private readonly ring: RingBuffer;
   private readonly frame: Float32Array;
   private sinceLastFrame = 0;
+  /**
+   * Hops skipped because a push brought more than one hop of new samples
+   * (the main thread fell behind or the worklet sent large blocks). Only the
+   * newest frame of such a push is analyzed.
+   */
+  dropped = 0;
+  private emitted = false;
 
   constructor(
     readonly frameSize: number,
@@ -64,6 +71,9 @@ export class FrameScheduler {
     this.ring.write(block);
     this.sinceLastFrame += block.length;
     if (this.ring.filled < this.frameSize || this.sinceLastFrame < this.hopSize) return 0;
+    // Filling the first frame is not falling behind.
+    if (this.emitted) this.dropped += Math.floor(this.sinceLastFrame / this.hopSize) - 1;
+    this.emitted = true;
     this.sinceLastFrame %= this.hopSize;
     this.ring.readLatest(this.frame);
     this.onFrame(this.frame);
@@ -73,5 +83,7 @@ export class FrameScheduler {
   reset(): void {
     this.ring.clear();
     this.sinceLastFrame = 0;
+    this.emitted = false;
+    this.dropped = 0;
   }
 }

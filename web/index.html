@@ -54,7 +54,16 @@
         "inLanguage": ["ru", "en"],
         "isAccessibleForFree": true,
         "image": "%VITE_SITE_URL%/og-image.png",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "sameAs": "https://github.com/Severnbli/kTone",
+        "isBasedOn": {
+          "@type": "SoftwareSourceCode",
+          "name": "kTone",
+          "codeRepository": "https://github.com/Severnbli/kTone",
+          "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+          "programmingLanguage": ["Rust", "TypeScript"]
+        }
       }
     </script>
 
@@ -85,7 +94,8 @@
         line-height: 1.5;
         color: #f5f3ff;
       }
-      .seo-fallback h1 {
+      .seo-fallback h1,
+      .seo-fallback a {
         color: #d8b4fe;
       }
       @media (prefers-color-scheme: light) {
@@ -95,7 +105,8 @@
         .seo-fallback {
           color: #17122b;
         }
-        .seo-fallback h1 {
+        .seo-fallback h1,
+        .seo-fallback a {
           color: #6d28d9;
         }
       }
@@ -124,6 +135,10 @@
           <li>Работает офлайн как приложение (PWA) на телефоне, планшете и компьютере.</li>
           <li>Бесплатно, без регистрации.</li>
         </ul>
+        <p>
+          Открытый исходный код (GPL-3.0):
+          <a href="https://github.com/Severnbli/kTone">github.com/Severnbli/kTone</a>.
+        </p>
         <noscript>
           <p>
             <strong>Для работы kTone нужен JavaScript. Включите его в настройках браузера.</strong>

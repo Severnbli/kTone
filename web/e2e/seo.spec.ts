@@ -53,7 +53,11 @@ test.describe('without JavaScript', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('kTone – тюнер для голоса');
     await expect(page.locator('.seo-fallback li').first()).toBeVisible();
-    await expect(page.getByText('Для работы kTone нужен JavaScript')).toBeVisible();
+    // Chromium's disabled-JS emulation does not render <noscript> like a real
+    // no-JS browser, so check the markup rather than its visibility.
+    expect(await page.locator('.seo-fallback noscript').innerHTML()).toContain(
+      'Для работы kTone нужен JavaScript',
+    );
   });
 });
 

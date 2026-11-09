@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   listAudioInputs,
+  onMicPermission,
   resolveDeviceId,
   type AudioInputs,
   type MediaDevicesLike,
@@ -14,7 +15,10 @@ interface Props {
   mediaDevices: MediaDevicesLike | null;
 }
 
-/** Microphone picker. Refreshes on mount and on `devicechange`. */
+/**
+ * Microphone picker. Refreshes on mount (the settings sheet mounts it on
+ * open), on `devicechange` and once the microphone permission is granted.
+ */
 export function MicDeviceSelect({ value, onChange, mediaDevices }: Props) {
   const { t } = useI18n();
   const [loaded, setList] = useState<AudioInputs | null>(null);
@@ -30,9 +34,11 @@ export function MicDeviceSelect({ value, onChange, mediaDevices }: Props) {
     };
     refresh();
     mediaDevices.addEventListener('devicechange', refresh);
+    const offPermission = onMicPermission(refresh);
     return () => {
       alive = false;
       mediaDevices.removeEventListener('devicechange', refresh);
+      offPermission();
     };
   }, [mediaDevices]);
 

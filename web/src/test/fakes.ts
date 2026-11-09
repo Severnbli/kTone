@@ -188,6 +188,8 @@ export function fakeMediaDevices(initial: FakeDevice[] = []) {
   const listeners = new Set<() => void>();
   const md: MediaDevicesLike & {
     plug(next: FakeDevice[]): void;
+    /** Changes the list without `devicechange`, as browsers do on a permission grant. */
+    replace(next: FakeDevice[]): void;
     readonly listeners: number;
   } = {
     enumerateDevices: vi.fn(async () => devices.map((d) => ({ ...d }))),
@@ -196,6 +198,9 @@ export function fakeMediaDevices(initial: FakeDevice[] = []) {
     plug(next) {
       devices = next;
       listeners.forEach((l) => l());
+    },
+    replace(next) {
+      devices = next;
     },
     get listeners() {
       return listeners.size;

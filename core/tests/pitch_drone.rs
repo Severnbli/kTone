@@ -529,3 +529,78 @@ fn drone_attack_and_release_are_never_a_note() {
         );
     }
 }
+
+/// Removes, repeats or zeroes `len` samples at `at`: what a starved audio
+/// thread does to the input stream (a lost, repeated or silent render quantum).
+fn glitch(signal: &[f32], at: usize, len: usize, kind: usize) -> Vec<f32> {
+    let mut out = signal[..at].to_vec();
+    match kind {
+        0 => {}
+        1 => out.extend_from_slice(&signal[at - len..at]),
+        _ => out.extend(std::iter::repeat_n(0.0, len)),
+    }
+    out.extend_from_slice(&signal[at + if kind == 0 { len } else { 0 }..]);
+    out
+}
+
+/// A glitch in the input stream is a phase jump of the drone: one amplitude
+/// and phase cannot fit both sides, so the residual looks periodic. Each
+/// glitch stays in the frame for four hops; none of them may show a note.
+#[test]
+fn input_glitches_in_the_leaked_drone_are_never_a_note() {
+    for &m in &DRONE_MIDIS {
+        let f = midi_to_hz(m);
+        // Skip the room's own onset (its reflections build up over 1709 samples).
+        let clean = leaked_drone(m, 0.0, 13)[(0.1 * SR) as usize..].to_vec();
+        for kind in 0..3 {
+            for len in [128, 300, 480] {
+                let mut signal = clean.clone();
+                // A glitch every 0.25 s after the first 0.2 s, at varied offsets.
+                for k in 0..4 {
+                    signal = glitch(&signal, (0.2 * SR) as usize + k * 12_097, len, kind);
+                }
+                let out = track(&mut tracker(Some(f), true), &signal, 0);
+                let accepted: Vec<(usize, f32)> = (0..out.len())
+                    .filter_map(|i| out[i].0.map(|p| (i, p.midi)))
+                    .collect();
+                assert!(
+                    accepted.is_empty(),
+                    "drone {m}, glitch {kind}/{len}: frames {accepted:?} shown as a note"
+                );
+            }
+        }
+    }
+}
+
+/// The price of the glitch guard: after the drone has leaked, a voice that
+/// enters on the drone pitch is shown at most `drone_confirm - 1` frames
+/// (about 43 ms) later than without the guard; other notes are not delayed.
+#[test]
+fn a_voice_entering_after_the_leak_is_delayed_only_on_the_drone_pitch() {
+    let m = 50.0;
+    let cut = (0.6 * SR) as usize;
+    let d = room(&drone(midi_to_hz(m), 1.5), 0.03, 0.0);
+    for (target, max_delay) in [(m, 4), (m + 12.0, 4), (m + 2.0, 0), (m + 4.0, 0)] {
+        let mut v = voice(1.5, &AH, 21, |_| target);
+        v[..cut].iter_mut().for_each(|s| *s = 0.0);
+        let signal = mix(&[(&v, 0.24), (&d, 1.0)], 0.0005, 22);
+        let first = |t: &mut PitchTracker| {
+            track(t, &signal, 0)
+                .iter()
+                .position(|(p, _)| p.is_some_and(|p| p.stable_midi == target as i32))
+                .expect("never shown")
+        };
+        let with = first(&mut tracker(Some(midi_to_hz(m)), true));
+        let config = TrackerConfig {
+            drone_confirm: 1,
+            ..TrackerConfig::for_hop(SR as f32, HOP)
+        };
+        let mut unguarded = PitchTracker::new(SR as f32, FRAME, config);
+        unguarded.set_drone(Some(midi_to_hz(m) as f32), true);
+        let without = first(&mut unguarded);
+        assert!(
+            with <= without + max_delay,
+            "voice {target}: shown at frame {with}, {without} without the guard"
+        );
+    }
+}

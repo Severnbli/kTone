@@ -33,10 +33,12 @@ test('sing towards a target note: hit, far away, wrong octave', async ({ page })
   await expect(page.getByTestId('target-open-note')).toHaveText('ля¹');
   await expect(gauge).toHaveAttribute('data-target', 'near');
   await expect(gauge).toHaveAttribute('data-zone', 'green');
-  const check = await page
-    .locator('.gauge-readout')
-    .evaluate((el) => getComputedStyle(el, '::before').content);
-  expect(check).toBe('"✓"');
+  // The check mark is CSS on the live zone: poll it like the attributes above.
+  await expect
+    .poll(() =>
+      page.locator('.gauge-readout').evaluate((el) => getComputedStyle(el, '::before').content),
+    )
+    .toBe('"✓"');
   await expect(page.getByTestId('note-target')).toHaveText('Цель: ля первой октавы');
   await expect(page.getByTestId('target-head')).toBeVisible();
 

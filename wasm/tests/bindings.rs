@@ -161,7 +161,9 @@ fn drone_filter_ignores_the_drone_but_not_a_voice() {
 
     a.set_drone(220.0, true);
     assert_eq!(count(&mut a, 220.0, &drone), (0, 20));
-    assert_eq!(count(&mut a, 220.0, &voice), (20, 0));
+    // Right after the leak, a voice on the drone pitch must hold for 5
+    // frames before it is shown (a stream glitch lasts 4).
+    assert_eq!(count(&mut a, 220.0, &voice), (16, 0));
 
     a.set_drone(220.0, false);
     assert_eq!(count(&mut a, 220.0, &drone), (20, 20));
@@ -197,4 +199,36 @@ fn reports_the_noise_floor_and_gate_on_unpitched_frames() {
     assert!((gate_db - floor_db - 11.0).abs() < 0.1, "gate {gate_db}");
     a.reset();
     assert_eq!(a.noise_floor(), 0.0);
+}
+
+#[test]
+fn an_a4_change_keeps_the_noise_floor_and_respells_at_once() {
+    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut seed = 11u32;
+    let noise: Vec<f32> = (0..SR as usize)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            0.0110 * (seed as f32 / u32::MAX as f32 - 0.5)
+        })
+        .collect();
+    let mut out = vec![0.0; FRAME_FIELDS];
+    for frame in noise.windows(FRAME).step_by(HOP) {
+        assert!(!a.process(frame, &mut out));
+    }
+    let floor = a.noise_floor();
+    let gate = a.gate();
+    assert!(floor > 0.0);
+
+    // A4 = 442: the floor and gate are about the room, not the reference.
+    assert!(a.configure(0, 0, 0, 0, 442.0));
+    assert_eq!(a.noise_floor(), floor);
+    assert_eq!(a.gate(), gate);
+
+    // 440 Hz is now about 8 cents flat of A4.
+    let out = run(&mut a, 440.0).expect("pitched");
+    assert_eq!(out[2], 69.0);
+    assert!((out[3] + 7.85).abs() < 1.0, "cents {}", out[3]);
+    assert!(a.noise_floor() > 0.0);
 }

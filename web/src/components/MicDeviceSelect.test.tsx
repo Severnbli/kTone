@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { announceMicPermission } from '../audio/devices';
 import { audioInput, fakeMediaDevices, flush } from '../test/fakes';
 import { MicDeviceSelect } from './MicDeviceSelect';
 
@@ -61,6 +62,34 @@ describe('MicDeviceSelect', () => {
     expect(options().map((o) => o[1])).toContain('USB Mic');
     unmount();
     expect(md.listeners).toBe(0);
+  });
+
+  it('refreshes once the microphone permission is granted, without devicechange', async () => {
+    const md = fakeMediaDevices([audioInput('')]);
+    const { unmount } = await setup('', md);
+    expect(screen.getByText(/после разрешения доступа/)).toBeInTheDocument();
+    // Granting the permission reveals the names; browsers fire no event.
+    md.replace([audioInput('a', 'Built-in'), audioInput('usb', 'USB Mic')]);
+    await act(async () => {
+      announceMicPermission();
+      await flush();
+    });
+    expect(options().map((o) => o[1])).toEqual(['Системный по умолчанию', 'Built-in', 'USB Mic']);
+    expect(screen.queryByText(/после разрешения доступа/)).toBeNull();
+    // No refresh after unmount.
+    unmount();
+    const calls = vi.mocked(md.enumerateDevices).mock.calls.length;
+    announceMicPermission();
+    expect(md.enumerateDevices).toHaveBeenCalledTimes(calls);
+  });
+
+  it('refreshes each time it is shown (the settings sheet mounts it on open)', async () => {
+    const md = fakeMediaDevices([audioInput('')]);
+    const { unmount } = await setup('', md);
+    unmount();
+    md.replace([audioInput('a', 'Built-in')]);
+    await setup('', md);
+    expect(options().map((o) => o[1])).toContain('Built-in');
   });
 
   it('renders nothing without mediaDevices', async () => {

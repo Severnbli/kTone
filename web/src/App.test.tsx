@@ -50,7 +50,8 @@ describe('App', () => {
     fireEvent.click(screen.getByTestId('key-badge'));
     fireEvent.click(screen.getByRole('button', { name: 'Фа мажор' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    act(() => mic.feed(440 * Math.pow(2, 1 / 12), 2048));
+    // A few frames: the 3-frame median follows the step on the second.
+    act(() => mic.feedSine(440 * Math.pow(2, 1 / 12), 2048 + 2 * 512));
     expect(screen.getByTestId('note-name')).toHaveTextContent('си♭');
     expect(screen.getByTestId('note-degree')).toHaveTextContent('IV');
     expect(screen.getByTestId('key-badge')).toHaveTextContent('Фа мажор');

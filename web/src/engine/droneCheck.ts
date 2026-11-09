@@ -13,6 +13,19 @@ const MAX_PARTIAL_FRACTION = 0.45;
 const ENVELOPE_TERMS = 2;
 const DIM = 2 * ENVELOPE_TERMS * DRONE_PARTIALS.length + 1;
 
+/**
+ * Pitched frames this close to the drone (or an octave of it) need a run of
+ * frames after drone leakage (`DRONE_CONFIRM_CENTS` in the core).
+ */
+export const DRONE_CONFIRM_CENTS = 100;
+
+/** Whether `f0` is within `cents` of `droneHz` or one octave of it. */
+export function nearDrone(f0: number, droneHz: number, cents: number): boolean {
+  const c = 1200 * Math.log2(f0 / droneHz);
+  const octaves = Math.round(c / 1200);
+  return Math.abs(octaves) <= 1 && Math.abs(c - 1200 * octaves) <= cents;
+}
+
 export type DroneVerdict = 'voice' | 'voiceOctaveUp' | 'drone';
 
 export interface Residual {

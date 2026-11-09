@@ -31,7 +31,8 @@ describe('PitchEngine', () => {
     expect(store.getNote()?.note).toEqual({ letter: 'A', accidental: 0, octave: 4 });
 
     engine.configure({ ...settings, key: { tonic: 'D', accidental: 0, mode: 'major' } });
-    mic.feedSine(440 * Math.pow(2, 1 / 12), 2048);
+    // A few frames: the 3-frame median follows the step on the second.
+    mic.feedSine(440 * Math.pow(2, 1 / 12), 2048 + 2 * 512);
     expect(store.getNote()?.note).toMatchObject({ letter: 'A', accidental: 1 });
 
     await engine.stop();

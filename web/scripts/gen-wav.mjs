@@ -133,6 +133,19 @@ const NOISE_FIXTURES = {
     }
     return out;
   })(),
+  // A4 for 1 s (10 ms fades), then 5 s of a quiet room (white noise at
+  // −70 dBFS): the singer stops. Long enough that the loop does not bring the
+  // note back while a test looks at the silence.
+  'a440-then-silence.wav': (() => {
+    const tone = SAMPLE_RATE;
+    const out = whiteNoise(6 * SAMPLE_RATE, dbfs(-70), 7);
+    const fade = 0.01 * SAMPLE_RATE;
+    for (let i = 0; i < tone; i++) {
+      const env = Math.min(1, i / fade, (tone - i) / fade);
+      out[i] += 0.5 * env * Math.sin((2 * Math.PI * 440 * i) / SAMPLE_RATE);
+    }
+    return out;
+  })(),
   // A noisy room: pink-ish noise with mains hum at −40 dBFS RMS, no voice.
   'room-noise.wav': roomNoise(4 * SAMPLE_RATE, dbfs(-40), 5),
 };

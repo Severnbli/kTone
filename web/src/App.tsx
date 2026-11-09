@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createAnalyzer } from './engine';
 import type { AnalyzerFactory } from './engine/types';
 import type { MediaDevicesLike } from './audio/devices';
+import { DebugStats, debugRequested } from './audio/debugStats';
 import { LevelStore } from './audio/level';
 import { documentVisibility, type PageVisibility } from './audio/lifecycle';
 import { MicError, startMic as realStartMic, type MicErrorCode, type StartMic } from './audio/mic';
@@ -14,6 +15,7 @@ import { CLEF_LABEL_KEY } from './components/clefLabels';
 import { DroneControls } from './components/DroneControls';
 import { ChevronDownIcon, GearIcon, MicIcon, StopIcon } from './components/icons';
 import { KeyPicker } from './components/KeyPicker';
+import { DebugOverlay } from './components/DebugOverlay';
 import { LevelMeter } from './components/LevelMeter';
 import { NoteDisplay } from './components/NoteDisplay';
 import { PitchCurve } from './components/PitchCurve';
@@ -67,6 +69,8 @@ export interface AppProps {
   wakeLock?: WakeLockApi | null;
   /** For the microphone picker; defaults to `navigator.mediaDevices`. */
   mediaDevices?: MediaDevicesLike | null;
+  /** Shows the latency overlay; defaults to `?debug` in the page URL. */
+  debug?: boolean;
 }
 
 const defaultVisibility = documentVisibility();
@@ -101,12 +105,14 @@ function Main({
   visibility = defaultVisibility,
   wakeLock: wakeLockApi,
   mediaDevices,
+  debug = debugRequested(window.location.search),
   settings,
   setSettings,
 }: AppProps & { settings: Settings; setSettings: (s: Settings) => void }) {
   const { t, lang } = useI18n();
   const store = useMemo(() => new PitchStore(), []);
   const levels = useMemo(() => new LevelStore(), []);
+  const debugStats = useMemo(() => (debug ? new DebugStats() : null), [debug]);
   const engineRef = useRef<PitchEngine | null>(null);
   engineRef.current ??= new PitchEngine(store, {
     factory,
@@ -114,6 +120,7 @@ function Main({
     now: () => performance.now(),
     visibility,
     levels,
+    debug: debugStats ?? undefined,
   });
   const [status, setStatus] = useState<Status>('idle');
 
@@ -305,6 +312,7 @@ function Main({
         </div>
 
         <LevelMeter levels={levels} hintHost={toastHost} />
+        {debugStats && <DebugOverlay stats={debugStats} />}
       </main>
 
       <footer className="dock">

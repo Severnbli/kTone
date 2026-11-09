@@ -30,7 +30,9 @@ function scaleLabels(zones: ZoneThresholds): number[] {
  * ±50 cent gauge. Updated imperatively on every analyzer frame (no React
  * re-render): the root's `data-zone` and `data-dir`, the needle position and
  * the readout. All of them follow the vibrato center (`centerCents`), so
- * vibrato around the target reads as a hit and the needle stays calm.
+ * vibrato around the target reads as a hit and the needle stays calm. Until
+ * the center of a new note is ready (`centerReady`), the zone is `pending`:
+ * neutral, so a vibrato onset never flashes red.
  *
  * Accuracy is never shown by color alone: the needle position, tick marks at
  * the zone edges, a check mark on a hit and the «ниже» / «выше» side label
@@ -85,11 +87,19 @@ export function CentsGauge({ store, zones, targetMidi = null }: Props) {
         targetMidi === null ? null : assessTarget(frame.centerMidi, targetMidi, zones);
       const cents = reading ? reading.cents : frame.centerCents;
       const text = reading ? targetMessage(reading, t, lang) : '';
-      const zone = reading ? reading.zone : classifyCents(cents, zones);
       const rounded = Math.round(cents);
       if (reading) root.dataset.target = reading.state;
-      root.dataset.zone = zone;
-      root.dataset.dir = zone === 'green' ? 'in' : cents < 0 ? 'flat' : 'sharp';
+      // Away from the target the direction is clear at once; fine accuracy waits for the center.
+      if (frame.centerReady || (reading && reading.state !== 'near')) {
+        const zone = reading ? reading.zone : classifyCents(cents, zones);
+        root.dataset.zone = zone;
+        root.dataset.dir = zone === 'green' ? 'in' : cents < 0 ? 'flat' : 'sharp';
+      } else {
+        // The center is still too young to judge: the needle moves, but
+        // no zone color, hit mark or side label yet.
+        root.dataset.zone = 'pending';
+        root.dataset.dir = 'none';
+      }
       root.setAttribute('aria-valuenow', String(Math.max(-RANGE, Math.min(RANGE, rounded))));
       root.setAttribute('aria-valuetext', text || `${rounded} ${t.cents}`);
       needle.style.left = `${needlePercent(cents)}%`;

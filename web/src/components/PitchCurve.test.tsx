@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PitchStore } from '../audio/pitchStore';
 import { frame } from '../test/frames';
 import { ZONE_COLORS } from '../zones';
-import { PitchCurve } from './PitchCurve';
+import { PENDING_COLOR, PitchCurve } from './PitchCurve';
 
 /** Minimal 2D context that records the color and points of each stroke. */
 function fakeContext() {
@@ -61,12 +61,13 @@ describe('PitchCurve', () => {
   });
 
   /**
-   * Renders the curve for frames of `[raw cents, center cents]` and returns the
+   * Renders the curve for frames of `[raw cents, center cents, center ready?]`
+   * and returns the
    * solid pitch strokes (each run of one zone color is also stroked once,
    * translucent, for the glow).
    */
   function draw(
-    frames: [number, number][],
+    frames: [number, number, boolean?][],
     { stable = 60, targetMidi = null }: { stable?: number; targetMidi?: number | null } = {},
   ) {
     const store = new PitchStore();
@@ -81,15 +82,15 @@ describe('PitchCurve', () => {
       />,
     );
     act(() => {
-      frames.forEach(([raw, center], i) =>
-        store.push(frame(stable, raw, { centerCents: center }), i * 11),
+      frames.forEach(([raw, center, ready = true], i) =>
+        store.push(frame(stable, raw, { centerCents: center, centerReady: ready }), i * 11),
       );
     });
     const pending = rafCallbacks;
     rafCallbacks = [];
     pending.forEach((cb) => cb(0));
     // Pitch runs are the only strokes drawn in a zone color.
-    const zoneColors: string[] = Object.values(ZONE_COLORS);
+    const zoneColors: string[] = [...Object.values(ZONE_COLORS), PENDING_COLOR];
     const pitch = fake.strokes.filter((s) => zoneColors.includes(s.color));
     const glow = pitch.filter((s) => s.alpha < 1);
     const solid = pitch.filter((s) => s.alpha === 1);
@@ -183,6 +184,36 @@ describe('PitchCurve', () => {
       const labels = (fake.ctx.fillText.mock.calls as [string, number, number][]).map(([t]) => t);
       expect(labels).toContain('▲ D4');
     });
+
+    it('stays neutral near the target while the center is young', () => {
+      const young: [number, number, boolean][] = [
+        [0, 0, false],
+        [0, 0, false],
+      ];
+      expect(draw(young, { stable: 62, targetMidi: 62 }).map((s) => s.color)).toEqual([
+        PENDING_COLOR,
+      ]);
+    });
+
+    it('a young center far from the target is already red', () => {
+      const young: [number, number, boolean][] = [
+        [0, 0, false],
+        [0, 0, false],
+      ];
+      expect(draw(young, { targetMidi: 62 }).map((s) => s.color)).toEqual([ZONE_COLORS.red]);
+    });
+  });
+
+  it('stays neutral until the center of the note is ready', () => {
+    // A vibrato onset whose young center is far off: no red flash.
+    const runs = draw([
+      [40, 40, false],
+      [35, 38, false],
+      [20, 30, false],
+      [0, 5, true],
+      [-20, 3, true],
+    ]);
+    expect(runs.map((s) => s.color)).toEqual([PENDING_COLOR, ZONE_COLORS.green]);
   });
 
   it('draws only note labels that fit, the tonic first', () => {

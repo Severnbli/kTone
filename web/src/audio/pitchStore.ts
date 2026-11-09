@@ -31,6 +31,8 @@ export class PitchHistory {
   readonly stable = new Float32Array(HISTORY_CAPACITY);
   /** Vibrato-center deviation in cents: the curve colors segments by this. */
   readonly centerCents = new Float32Array(HISTORY_CAPACITY);
+  /** 1 when the center was ready to judge (`PitchFrame.centerReady`), else 0. */
+  readonly centerReady = new Uint8Array(HISTORY_CAPACITY);
   /** Index of the next write. */
   head = 0;
   size = 0;
@@ -40,6 +42,7 @@ export class PitchHistory {
     this.midi[this.head] = frame ? frame.midi : NaN;
     this.stable[this.head] = frame ? frame.stableMidi : NaN;
     this.centerCents[this.head] = frame ? frame.centerCents : NaN;
+    this.centerReady[this.head] = frame?.centerReady ? 1 : 0;
     this.head = (this.head + 1) % HISTORY_CAPACITY;
     if (this.size < HISTORY_CAPACITY) this.size++;
   }

@@ -19,6 +19,8 @@ const LABEL_PRIORITY = [0, 3, 2, 3, 1, 3, 3];
 const MAX_GAP_MS = 120;
 /** With a target, the sung pitch is kept at least this far (semitones) inside the view. */
 const VIEW_MARGIN = 1.5;
+/** Line color while the center of a new note is not ready (fallback for `--muted`). */
+export const PENDING_COLOR = '#8a8f98';
 
 interface Props {
   store: PitchStore;
@@ -31,6 +33,9 @@ interface Props {
   targetLabel?: string;
 }
 
+/** A zone, or `pending`: the center of the note is too young to judge. */
+type Shade = Zone | 'pending';
+
 interface Palette {
   grid: string;
   tonic: string;
@@ -39,7 +44,8 @@ interface Palette {
   band: string;
   target: string;
   targetBand: string;
-  zones: Record<Zone, string>;
+  /** Line colors: the zones, and `pending` while the center is not ready. */
+  zones: Record<Shade, string>;
 }
 
 function readPalette(el: HTMLElement): Palette {
@@ -57,6 +63,7 @@ function readPalette(el: HTMLElement): Palette {
       green: v('--zone-green', ZONE_COLORS.green),
       yellow: v('--zone-yellow', ZONE_COLORS.yellow),
       red: v('--zone-red', ZONE_COLORS.red),
+      pending: v('--muted', PENDING_COLOR),
     },
   };
 }
@@ -223,13 +230,15 @@ export function PitchCurve({
       }
 
       // Raw pitch line (vibrato stays visible), colored by the accuracy of the
-      // vibrato center relative to the stable note (or the target), in runs of one color.
+      // vibrato center relative to the stable note (or the target), in runs of
+      // one color; neutral until the center of a new note is ready (except, with
+      // a target, more than half a semitone away from it).
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      let runZone: Zone | null = null;
+      let runZone: Shade | null = null;
       let headX = NaN;
       let headY = NaN;
-      let headZone: Zone = 'green';
+      let headZone: Shade = 'green';
       const strokeRun = () => {
         if (runZone === null) return;
         ctx.strokeStyle = palette.zones[runZone];
@@ -261,7 +270,8 @@ export function PitchCurve({
             targetMidi === null
               ? h.centerCents[idx]
               : (h.stable[idx] - targetMidi) * 100 + h.centerCents[idx];
-          const zone = classifyCents(dev, zones);
+          const ready = h.centerReady[idx] || (targetMidi !== null && Math.abs(dev) >= 50);
+          const zone: Shade = ready ? classifyCents(dev, zones) : 'pending';
           if (zone !== runZone) {
             strokeRun();
             runZone = zone;

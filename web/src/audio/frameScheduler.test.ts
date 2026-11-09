@@ -52,8 +52,14 @@ describe('FrameScheduler', () => {
     const frames: number[][] = [];
     const s = new FrameScheduler(8, 4, (f) => frames.push(Array.from(f)));
     s.push(ramp(0, 8));
+    expect(s.dropped).toBe(0); // filling the first frame is no drop
     expect(s.push(ramp(8, 12))).toBe(1); // three hops worth, one frame
     expect(frames.at(-1)).toEqual([12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(s.dropped).toBe(2);
+    s.push(ramp(20, 4));
+    expect(s.dropped).toBe(2);
+    s.reset();
+    expect(s.dropped).toBe(0);
   });
 
   it('works with 2048/512 and 128-sample worklet quanta', () => {
@@ -66,6 +72,7 @@ describe('FrameScheduler', () => {
     for (let i = 0; i < 64; i++) s.push(block); // 8192 samples
     // First frame at 2048, then every 512: (8192 - 2048) / 512 + 1
     expect(count).toBe(13);
+    expect(s.dropped).toBe(0);
   });
 
   it('reset starts over', () => {

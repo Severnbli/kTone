@@ -166,6 +166,32 @@ describe('CentsGauge', () => {
       expect(gauge).toHaveAttribute('data-zone', 'green');
       expect(screen.getByTestId('gauge-message')).toHaveTextContent('');
     });
+
+    it('near the target waits for the center; far away the direction shows at once', () => {
+      const { store, gauge, message } = setupTarget(69);
+      act(() => store.push(frame(69, 3, { centerReady: false }), 0));
+      expect(gauge).toHaveAttribute('data-target', 'near');
+      expect(gauge).toHaveAttribute('data-zone', 'pending');
+      expect(gauge).toHaveAttribute('data-dir', 'none');
+      act(() => store.push(frame(69, 3), 10));
+      expect(gauge).toHaveAttribute('data-zone', 'green');
+      act(() => store.push(frame(67, 0, { centerReady: false }), 20));
+      expect(gauge).toHaveAttribute('data-target', 'far');
+      expect(gauge).toHaveAttribute('data-zone', 'red');
+      expect(message).toHaveTextContent('выше на 2 полутона');
+    });
+  });
+
+  it('shows no zone until the center is ready, but moves the needle', () => {
+    const { store, gauge } = setup();
+    const needle = screen.getByTestId('gauge-needle');
+    act(() => store.push(frame(69, 40, { centerReady: false }), 0));
+    expect(gauge).toHaveAttribute('data-zone', 'pending');
+    expect(gauge).toHaveAttribute('data-dir', 'none');
+    expect(needle.style.left).toBe('90%');
+    act(() => store.push(frame(69, 40), 10));
+    expect(gauge).toHaveAttribute('data-zone', 'red');
+    expect(gauge).toHaveAttribute('data-dir', 'sharp');
   });
 
   it('returns to no zone on silence', () => {

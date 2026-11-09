@@ -193,6 +193,22 @@ describe('mock analyzer', () => {
       }
     });
 
+    it('reports the center ready at once for a straight tone, later for a vibrato', async () => {
+      const a = await createMockAnalyzer(SR);
+      const straight = run(a, 0.5, () => 64);
+      const firstReady = straight.findIndex(({ f }) => f?.centerReady);
+      expect(straight[0].f!.centerReady).toBe(false);
+      expect(firstReady).toBeGreaterThan(0);
+      expect(firstReady).toBeLessThanOrEqual(6);
+      expect(straight.slice(firstReady).every(({ f }) => f!.centerReady)).toBe(true);
+
+      const b = await createMockAnalyzer(SR);
+      const swinging = run(b, 0.6, vibrato(64));
+      const t = swinging.find(({ f }) => f?.centerReady)!.t - swinging[0].t;
+      expect(t).toBeGreaterThan(0.12);
+      expect(t).toBeLessThan(0.22);
+    });
+
     it('restarts after a pause but not after a single dropout', async () => {
       const a = await createMockAnalyzer(SR);
       const silence = new Float32Array(a.frameSize);

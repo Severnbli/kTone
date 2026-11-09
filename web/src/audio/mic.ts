@@ -3,6 +3,7 @@
 // samples posted to the main thread. The session reports interruptions
 // (track ended or muted, context suspended or interrupted) via `onStateChange`.
 
+import type { AudioLatency } from './debugStats';
 import { isContextPaused, resumeContext } from './lifecycle';
 
 export type MicErrorCode = 'denied' | 'notFound' | 'unsupported' | 'error';
@@ -30,6 +31,8 @@ export interface MicSession {
   readonly state: MicState;
   /** Tries to resume a suspended session. Resolves to true when running again. */
   resume(): Promise<boolean>;
+  /** What the AudioContext reports about its latency (for the `?debug` overlay). */
+  latency?(): AudioLatency;
   stop(): Promise<void>;
 }
 
@@ -152,6 +155,16 @@ export async function openMicStream(
  * Must be called from a user gesture (creates/resumes the AudioContext).
  * `onBlock` receives a block that is only valid during the call.
  */
+/** `baseLatency` / `outputLatency` of a context; null where the browser lacks them. */
+export function contextLatency(ctx: {
+  readonly baseLatency?: number;
+  readonly outputLatency?: number;
+}): AudioLatency {
+  const finite = (v: number | undefined) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  return { baseLatency: finite(ctx.baseLatency), outputLatency: finite(ctx.outputLatency) };
+}
+
 export const startMic: StartMic = async (onBlock, options = {}) => {
   const { blockSize = 512, onStateChange, deviceId } = options;
   if (
@@ -194,6 +207,7 @@ export const startMic: StartMic = async (onBlock, options = {}) => {
 
     return {
       sampleRate: ctx.sampleRate,
+      latency: () => contextLatency(ctx),
       get state() {
         return micState(track, ctx);
       },

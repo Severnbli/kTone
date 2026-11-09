@@ -8,9 +8,42 @@
 //! `0.9 * highest key maximum` and refines it with parabolic interpolation.
 //! [`PitchTracker`] gates the raw estimates (RMS, clarity, frequency range),
 //! guards against octave errors, median-filters in the semitone domain and
-//! applies hysteresis to the displayed note. It also reports the vibrato
-//! center: a triangular-weighted moving average of the accepted estimates over
-//! about 300 ms, which the UI uses to judge accuracy.
+//! decides the displayed note (see "Note switching" below). It also reports
+//! the vibrato center: a triangular-weighted moving average of the accepted
+//! estimates over about 300 ms, which the UI uses to judge accuracy, and
+//! whether that center is ready to be judged yet.
+//!
+//! Short window: while the pitch is high enough (at least
+//! [`SHORT_WINDOW_PERIODS`] periods in half a frame), only the newest half of
+//! the frame is analyzed, which halves the detector's share of the delay. A
+//! short-window estimate more than [`SHORT_WINDOW_MAX_JUMP`] semitones away
+//! from the current pitch, an unclear short window, and pitches near the drone
+//! fall back to the full frame, so leaps, low notes and octave errors are
+//! judged on the full window as before.
+//!
+//! Note switching: with `d` the median pitch minus the displayed note (in
+//! semitones),
+//! - `|d| <= 0.5`: keep the note;
+//! - `|d| > 1.5`: a leap, switch at once;
+//! - otherwise (the neighbor is closer) switch to the neighbor when
+//!   - the note is *settled* (its history covers at least 3/4 of the center
+//!     window, longer than a slow vibrato cycle) and *steady* (no swing, see
+//!     below), or was entered by a leap or an onset less than
+//!     [`LEAP_TRANSIT_FRAMES`] frames ago, and `|d|` exceeds
+//!     `0.5 + hysteresis`: at once, as before;
+//!   - the note *swings* (vibrato, or an overshoot and correction) or is not
+//!     settled yet, and `|d|` stays past `0.5 + hysteresis` for `switch_dwell`
+//!     frames in a row (about 60 ms) or the excess over the band summed over
+//!     those frames reaches [`SWITCH_EXCESS`]: a vibrato trough only grazes
+//!     the band for a few frames, a real step lands well past it;
+//!   - the note is steady, has been held for at least 1/3 of the center window
+//!     and its vibrato center is past the midpoint too: the singer has moved
+//!     there (a drift, or a note entered on the way to the next one, like a
+//!     passing G♯ on a glide from G to a flat A).
+//!
+//! A note *swings* when its history (since it was shown, at most the center
+//! window) fell at least [`SWING_TURN`] semitones from a maximum and then rose
+//! that much again, or the other way round.
 //!
 //! Drone filter: when the app plays a drone (see [`PitchTracker::set_drone`]),
 //! a frame whose pitch matches the drone (or an octave of it) is checked for
@@ -37,6 +70,8 @@ const SILENCE_RMS: f64 = 1e-7;
 const MAX_FRAME_SIZE: usize = 1 << 18;
 /// Smallest frame the detector can work with.
 const MIN_FRAME_SIZE: usize = 8;
+/// Smallest half frame [`PitchTracker`] uses as a short window.
+const MIN_SHORT_FRAME: usize = 256;
 
 /// Number of consecutive frames an octave jump must persist before it is accepted.
 const OCTAVE_CONFIRM_FRAMES: u32 = 4;
@@ -58,6 +93,43 @@ pub const CENTER_WINDOW_SECS: f32 = 0.3;
 const DEFAULT_CENTER_WINDOW: usize = 28;
 /// Upper bound for [`TrackerConfig::center_window`].
 const MAX_CENTER_WINDOW: usize = 255;
+/// The center is ready once the current note has filled this fraction
+/// (numerator, denominator) of the center window: about 180 ms, so even a
+/// ±40 cent vibrato at 4.5 Hz averages to within ±25 cents...
+const CENTER_READY_FRACTION: (usize, usize) = (3, 5);
+/// ... or earlier, after this many frames (about 64 ms at hop 512, 48 kHz),
+/// if they all lie within [`CENTER_READY_SPREAD`] semitones: a straight tone
+/// needs no averaging. The span is long enough that even near a crest a
+/// vibrato of ±25 cents at 4.5 Hz moves more than that.
+pub const CENTER_READY_MIN_FRAMES: usize = 6;
+/// See [`CENTER_READY_MIN_FRAMES`].
+pub const CENTER_READY_SPREAD: f64 = 0.08;
+/// Time the pitch must stay past the hysteresis band of a swinging or
+/// unsettled note before the neighbor is shown ([`TrackerConfig::switch_dwell`]).
+pub const SWITCH_DWELL_SECS: f32 = 0.06;
+/// [`TrackerConfig::switch_dwell`] for hop 512 at 48 kHz (6 * 512 / 48000 = 64 ms).
+const DEFAULT_SWITCH_DWELL: usize = 6;
+/// Upper bound for [`TrackerConfig::switch_dwell`].
+const MAX_SWITCH_DWELL: usize = 255;
+/// ... or until its excess over the band, summed over those frames, reaches
+/// this many semitones. A ±90 cent vibrato at 4.5 Hz sums to about 0.2; a
+/// semitone step adds about 0.2 per frame.
+pub const SWITCH_EXCESS: f64 = 0.3;
+/// A note swings when its pitch turned by at least this many semitones both
+/// ways (see "Note switching" in the module docs).
+pub const SWING_TURN: f64 = 0.2;
+/// For this many frames after a leap or an onset, the note shown switches to
+/// a neighbor past the band at once: the median of a leap passes the notes in
+/// between, and an onset may land on a scoop or a vibrato crest, neither of
+/// which is the note the singer holds.
+pub const LEAP_TRANSIT_FRAMES: usize = 3;
+/// The short (half-frame) window is used for pitches with at least this many
+/// periods in it, so the lag search keeps a wide margin below its limit
+/// (187.5 Hz, about F♯3, for 1024 samples at 48 kHz).
+pub const SHORT_WINDOW_PERIODS: f64 = 4.0;
+/// A short-window estimate this far (semitones) from the current pitch is
+/// checked on the full frame instead.
+pub const SHORT_WINDOW_MAX_JUMP: f64 = 1.5;
 /// Partials of the app drone as multiples of its frequency: a sine on the
 /// tonic plus a triangle an octave up (odd harmonics 1, 3, 5 of `2f`).
 pub const DRONE_PARTIALS: [f64; 4] = [1.0, 2.0, 6.0, 10.0];
@@ -526,8 +598,16 @@ pub struct TrackerConfig {
     /// Median filter length in frames (odd).
     pub median_window: usize,
     /// How far (cents) past the midpoint between two semitones the pitch must
-    /// move before `stable_midi` switches to the neighbor.
+    /// move before `stable_midi` switches to the neighbor without waiting for
+    /// the center (see "Note switching" in the module docs).
     pub hysteresis_cents: f32,
+    /// Frames the pitch must stay past the hysteresis band of a swinging or
+    /// unsettled note before the neighbor is shown (clamped to `1..=255`).
+    /// [`TrackerConfig::for_hop`] sizes it to [`SWITCH_DWELL_SECS`].
+    pub switch_dwell: usize,
+    /// Analyze only the newest half of the frame while the pitch is high
+    /// enough (see the module docs).
+    pub short_window: bool,
     /// Vibrato-center window in frames (clamped to `1..=255`). The default fits
     /// hop 512 at 48 kHz; use [`TrackerConfig::for_hop`] for other hops/rates.
     pub center_window: usize,
@@ -545,13 +625,16 @@ pub struct TrackerConfig {
 }
 
 impl TrackerConfig {
-    /// Default config with `center_window` sized to [`CENTER_WINDOW_SECS`] for
-    /// frames that start `hop` samples apart. Invalid rates or hops keep the default.
+    /// Default config with `center_window` sized to [`CENTER_WINDOW_SECS`] and
+    /// `switch_dwell` to [`SWITCH_DWELL_SECS`] for frames that start `hop`
+    /// samples apart. Invalid rates or hops keep the default.
     pub fn for_hop(sample_rate: f32, hop: usize) -> Self {
         let mut config = Self::default();
         if sample_rate.is_finite() && sample_rate > 0.0 && hop > 0 {
             let frames = (CENTER_WINDOW_SECS as f64 * sample_rate as f64 / hop as f64).round();
             config.center_window = (frames as usize).clamp(1, MAX_CENTER_WINDOW);
+            let dwell = (SWITCH_DWELL_SECS as f64 * sample_rate as f64 / hop as f64).round();
+            config.switch_dwell = (dwell as usize).clamp(1, MAX_SWITCH_DWELL);
         }
         config
     }
@@ -559,8 +642,8 @@ impl TrackerConfig {
 
 impl Default for TrackerConfig {
     /// Voice defaults: 70..1400 Hz, clarity 0.8, RMS 0.005 (about -46 dBFS),
-    /// median over 5 frames (about 50 ms at hop 512), 30 cents hysteresis,
-    /// vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
+    /// median over 3 frames (about 30 ms at hop 512), 30 cents hysteresis
+    /// with a 6 frame (64 ms) dwell for swinging notes, short window on, vibrato center over 28 frames (about 300 ms at hop 512, 48 kHz),
     /// drone check within ±15 cents; drone-pitched frames need 0.1 % (-30 dB)
     /// of periodic non-drone energy with residual clarity 0.5 to count as voice.
     fn default() -> Self {
@@ -569,8 +652,10 @@ impl Default for TrackerConfig {
             max_hz: 1400.0,
             clarity_threshold: 0.8,
             rms_threshold: 0.005,
-            median_window: 5,
+            median_window: 3,
             hysteresis_cents: 30.0,
+            switch_dwell: DEFAULT_SWITCH_DWELL,
+            short_window: true,
             center_window: DEFAULT_CENTER_WINDOW,
             drone_tolerance_cents: 15.0,
             drone_voice_energy: 0.001,
@@ -596,6 +681,12 @@ pub struct TrackedPitch {
     pub center_midi: f32,
     /// Deviation of `center_midi` from `stable_midi` in cents.
     pub center_cents: f32,
+    /// `false` right after an onset or a note change while the center window
+    /// holds too little of a swinging pitch to be judged (it would still
+    /// follow the vibrato); the UI should not color the zone then. A straight
+    /// tone is ready after 6 frames (about 64 ms), a vibrato after 3/5 of the
+    /// window (about 180 ms). Stays set until the note changes.
+    pub center_ready: bool,
     /// Clarity of the current frame.
     pub clarity: f32,
     /// RMS level of the current frame.
@@ -619,6 +710,12 @@ enum DroneCheck {
 /// Allocates only in `new`; `process` must not allocate.
 pub struct PitchTracker {
     mpm: Mpm,
+    /// Detector for the newest half of the frame, see the module docs.
+    short: Option<Mpm>,
+    /// Lowest pitch (Hz) analyzed with `short`.
+    short_min_hz: f64,
+    /// The last detection ran on the full frame (not the short window).
+    full_frame: bool,
     config: TrackerConfig,
     frame_size: usize,
     /// Ring buffer of accepted estimates in semitones relative to A4 = 440 Hz
@@ -639,6 +736,16 @@ pub struct PitchTracker {
     center_hist: Vec<f64>,
     center_len: usize,
     center_pos: usize,
+    /// Consecutive frames past the hysteresis band, their direction (±1) and
+    /// the summed excess over the band (semitones).
+    past_band: usize,
+    past_band_dir: i32,
+    past_excess: f64,
+    /// The current note was entered by a leap (more than 1.5 semitones) or
+    /// at an onset, see [`LEAP_TRANSIT_FRAMES`].
+    transit: bool,
+    /// The center of the current note is ready, see [`Self::center_ready`].
+    ready: bool,
     /// Frequency of the drone the app plays, 0 when off.
     drone_hz: f64,
     drone_filter: bool,
@@ -650,8 +757,17 @@ impl PitchTracker {
     pub fn new(sample_rate: f32, frame_size: usize, config: TrackerConfig) -> Self {
         let window = config.median_window.clamp(1, MAX_MEDIAN_WINDOW);
         let center_window = config.center_window.clamp(1, MAX_CENTER_WINDOW);
+        let half = frame_size / 2;
+        let short = if config.short_window && half >= MIN_SHORT_FRAME {
+            Some(Mpm::new(sample_rate, half)).filter(|m| m.usable)
+        } else {
+            None
+        };
         Self {
             mpm: Mpm::new(sample_rate, frame_size),
+            short,
+            short_min_hz: SHORT_WINDOW_PERIODS * sample_rate as f64 / half.max(1) as f64,
+            full_frame: true,
             config,
             frame_size,
             history: vec![0.0; window],
@@ -666,6 +782,11 @@ impl PitchTracker {
             center_hist: vec![0.0; center_window],
             center_len: 0,
             center_pos: 0,
+            past_band: 0,
+            past_band_dir: 0,
+            past_excess: 0.0,
+            transit: false,
+            ready: false,
             drone_hz: 0.0,
             drone_filter: false,
             drone_leak: false,
@@ -708,7 +829,7 @@ impl PitchTracker {
         if !loud_enough || has_silent_edge(frame) {
             return self.invalid();
         }
-        let Some(est) = self.mpm.detect(frame) else {
+        let Some(est) = self.detect(frame) else {
             return self.invalid();
         };
         let clear_enough = est.clarity >= self.config.clarity_threshold;
@@ -718,7 +839,7 @@ impl PitchTracker {
             return self.invalid();
         }
         let mut est = est;
-        match self.drone_check(est) {
+        match self.drone_check(est, frame) {
             DroneCheck::Drone => {
                 self.drone_leak = true;
                 if self.drone_filter {
@@ -742,21 +863,19 @@ impl PitchTracker {
             self.stable = None;
             self.stable_a4 = a4_hz;
         }
-        let band = 0.5 + hysteresis_semitones(self.config.hysteresis_cents);
-        let stable = match self.stable {
-            Some(s) if (midi - s as f64).abs() <= band => s,
-            _ => midi.round() as i32,
-        };
+        // Semitones at 440 Hz -> MIDI at the configured reference.
+        let a4_shift = 12.0 * (440.0 / a4_hz as f64).log2();
+        let stable = self.decide_note(midi, a4_shift);
         if self.stable != Some(stable) {
             // A new note: do not drag the center from the previous one.
             self.center_len = 0;
+            self.ready = false;
             self.center_pos = 0;
+            self.past_band = 0;
         }
         self.stable = Some(stable);
 
         self.push_center(value);
-        // Semitones at 440 Hz -> MIDI at the configured reference.
-        let a4_shift = 12.0 * (440.0 / a4_hz as f64).log2();
         let center_midi = self.center() + a4_shift;
 
         Some(TrackedPitch {
@@ -766,6 +885,7 @@ impl PitchTracker {
             cents: ((midi - stable as f64) * 100.0) as f32,
             center_midi: center_midi as f32,
             center_cents: ((center_midi - stable as f64) * 100.0) as f32,
+            center_ready: self.center_ready(),
             clarity: est.clarity,
             rms: rms as f32,
         })
@@ -778,9 +898,151 @@ impl PitchTracker {
         self.drone_leak = false;
     }
 
+    /// Runs the detector on the newest half of the frame when the current
+    /// pitch allows it, else (or when the short estimate is doubtful) on the
+    /// whole frame. See the module docs.
+    fn detect(&mut self, frame: &[f32]) -> Option<PitchEstimate> {
+        self.full_frame = false;
+        if let Some(est) = self.detect_short(frame) {
+            return Some(est);
+        }
+        self.full_frame = true;
+        self.mpm.detect(frame)
+    }
+
+    fn detect_short(&mut self, frame: &[f32]) -> Option<PitchEstimate> {
+        let short = self.short.as_mut()?;
+        if self.hist_len == 0 || frame.len() != self.frame_size {
+            return None;
+        }
+        // The current pitch (semitones at 440 Hz) from the median history.
+        let current = median_of(&self.history[..self.hist_len], &mut self.scratch);
+        let current_hz = 440.0 * ((current - 69.0) / 12.0).exp2();
+        if current_hz < self.short_min_hz {
+            return None;
+        }
+        let est = short.detect(&frame[frame.len() - short.frame_size..])?;
+        let f0 = est.frequency_hz as f64;
+        let raw = 69.0 + 12.0 * (f0 / 440.0).log2();
+        let trusted = est.clarity >= self.config.clarity_threshold
+            && (raw - current).abs() <= SHORT_WINDOW_MAX_JUMP
+            && f0 >= self.short_min_hz;
+        trusted.then_some(est)
+    }
+
+    /// The note to display for the median pitch `midi` (at the configured
+    /// reference), see "Note switching" in the module docs. `a4_shift`
+    /// converts the 440 Hz history to that reference.
+    fn decide_note(&mut self, midi: f64, a4_shift: f64) -> i32 {
+        let Some(s) = self.stable else {
+            self.transit = true;
+            return midi.round() as i32;
+        };
+        let d = midi - s as f64;
+        if d.abs() <= 0.5 {
+            self.past_band = 0;
+            return s;
+        }
+        if d.abs() > 1.5 {
+            self.transit = true;
+            return midi.round() as i32;
+        }
+        let dir: i32 = if d > 0.0 { 1 } else { -1 };
+        let band = 0.5 + hysteresis_semitones(self.config.hysteresis_cents);
+        if d.abs() > band {
+            if self.past_band > 0 && self.past_band_dir == dir {
+                self.past_band = self.past_band.saturating_add(1);
+                self.past_excess += d.abs() - band;
+            } else {
+                self.past_band = 1;
+                self.past_band_dir = dir;
+                self.past_excess = d.abs() - band;
+            }
+        } else {
+            self.past_band = 0;
+        }
+        let swinging = self.swinging();
+        // Longer than a cycle of a slow (4.5 Hz) vibrato: a note shown for a
+        // shorter time may be a vibrato that has not turned yet.
+        let settled = 4 * self.center_len >= 3 * self.center_hist.len();
+        let in_transit = self.transit && self.center_len < LEAP_TRANSIT_FRAMES;
+        let dwell = if (swinging || !settled) && !in_transit {
+            self.config.switch_dwell.clamp(1, MAX_SWITCH_DWELL)
+        } else {
+            1
+        };
+        let excess = self.past_band > 0 && self.past_excess >= SWITCH_EXCESS;
+        // A center restarted in the middle of a swing averages part of a
+        // cycle, so only a steady pitch may move the display with it.
+        let reference = s as f64 - a4_shift;
+        let center_moved = !swinging
+            && 3 * self.center_len >= self.center_hist.len()
+            && dir as f64 * (self.center() - reference) > 0.5;
+        if self.past_band >= dwell || excess || center_moved {
+            self.transit = false;
+            s + dir
+        } else {
+            s
+        }
+    }
+
+    /// Whether the history of the current note (its center window: since it
+    /// was shown, at most ~300 ms) turned by [`SWING_TURN`] semitones both
+    /// ways: fell that much below a maximum and then rose that much from the
+    /// lowest point, or the other way round. A vibrato does within a cycle; an
+    /// approach into the note (a scoop) only moves one way.
+    fn swinging(&self) -> bool {
+        let (mut hi, mut lo) = (f64::NEG_INFINITY, f64::INFINITY);
+        // Lowest value since the pitch first fell SWING_TURN below an earlier
+        // maximum, and highest since it first rose that much above a minimum.
+        let (mut valley, mut peak) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in self.center_values() {
+            if v - valley >= SWING_TURN || peak - v >= SWING_TURN {
+                return true;
+            }
+            hi = hi.max(v);
+            lo = lo.min(v);
+            if hi - v >= SWING_TURN {
+                valley = valley.min(v);
+            }
+            if v - lo >= SWING_TURN {
+                peak = peak.max(v);
+            }
+        }
+        false
+    }
+
+    /// See [`TrackedPitch::center_ready`]. Once ready, a note stays ready
+    /// until it changes, so the zone does not blink on and off.
+    fn center_ready(&mut self) -> bool {
+        let len = self.center_len;
+        if !self.ready
+            && CENTER_READY_FRACTION.1 * len >= CENTER_READY_FRACTION.0 * self.center_hist.len()
+        {
+            self.ready = true;
+        }
+        if !self.ready && len >= CENTER_READY_MIN_FRAMES {
+            let (lo, hi) = self
+                .center_values()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                    (lo.min(v), hi.max(v))
+                });
+            self.ready = hi - lo <= CENTER_READY_SPREAD;
+        }
+        self.ready
+    }
+
+    /// The center history of the current note, oldest first.
+    fn center_values(&self) -> impl Iterator<Item = f64> + '_ {
+        let len = self.center_len;
+        let cap = self.center_hist.len();
+        let oldest = (self.center_pos + cap - len) % cap;
+        (0..len).map(move |i| self.center_hist[(oldest + i) % cap])
+    }
+
     /// Drone leakage: the pitch is the drone's (or an octave of it) and
     /// removing the drone partials leaves almost nothing periodic.
-    fn drone_check(&mut self, est: PitchEstimate) -> DroneCheck {
+    fn drone_check(&mut self, est: PitchEstimate, frame: &[f32]) -> DroneCheck {
         let drone = self.drone_hz;
         let f0 = est.frequency_hz as f64;
         if drone <= 0.0 {
@@ -790,6 +1052,10 @@ impl PitchTracker {
         let octaves = (cents / 1200.0).round();
         let off = (cents - 1200.0 * octaves).abs();
         if !(octaves.abs() <= 1.0 && off <= OCTAVE_UP_WINDOW_CENTS) {
+            return DroneCheck::Voice;
+        }
+        // The check is tuned on, and reads the residual of, the full frame.
+        if !self.full_frame && self.mpm.detect(frame).is_none() {
             return DroneCheck::Voice;
         }
         let near = off <= self.config.drone_tolerance_cents as f64;
@@ -838,7 +1104,9 @@ impl PitchTracker {
         self.pending_value = 0.0;
         self.stable = None;
         self.center_len = 0;
+        self.ready = false;
         self.center_pos = 0;
+        self.past_band = 0;
     }
 
     fn invalid(&mut self) -> Option<TrackedPitch> {
@@ -923,19 +1191,25 @@ impl PitchTracker {
     /// Median of the history (mean of the two middle values for an even count).
     /// The history must not be empty.
     fn median(&mut self) -> f64 {
-        let len = self.hist_len;
-        if len == 0 {
-            return 0.0;
-        }
         // While filling, valid entries are history[0..len]; once full, all of it.
-        let s = &mut self.scratch[..len];
-        s.copy_from_slice(&self.history[..len]);
-        s.sort_unstable_by(f64::total_cmp);
-        if len % 2 == 1 {
-            s[len / 2]
-        } else {
-            0.5 * (s[len / 2 - 1] + s[len / 2])
-        }
+        median_of(&self.history[..self.hist_len], &mut self.scratch)
+    }
+}
+
+/// Median of `values` (mean of the two middle values for an even count, 0 for
+/// none), sorted in `scratch`, which must be at least as long.
+fn median_of(values: &[f64], scratch: &mut [f64]) -> f64 {
+    let len = values.len();
+    if len == 0 {
+        return 0.0;
+    }
+    let s = &mut scratch[..len];
+    s.copy_from_slice(values);
+    s.sort_unstable_by(f64::total_cmp);
+    if len % 2 == 1 {
+        s[len / 2]
+    } else {
+        0.5 * (s[len / 2 - 1] + s[len / 2])
     }
 }
 
@@ -1033,7 +1307,7 @@ mod tests {
         for v in [7.0, 8.0, 9.0, 9.5] {
             t.push_history(v);
         }
-        // Window 5 now holds 10, 7, 8, 9, 9.5.
+        // Window 3 now holds 8, 9, 9.5.
         assert_eq!(t.median(), 9.0);
     }
 

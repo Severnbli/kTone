@@ -143,3 +143,21 @@ export function keyLabel(key: KeySpec, lang: Lang): string {
   }
   return `${key.tonic}${accidentalGlyph(key.accidental)} ${key.mode}`;
 }
+
+/** Octave marks after the name, from the small octave (none) up. */
+const RU_MARK_UP = ['', '¹', '²', '³', '⁴', '⁵'];
+/** Marks after the capitalized name, from the great octave (none) down. */
+const RU_MARK_DOWN = ['', '₁', '₂'];
+
+/**
+ * Shortest unambiguous note label for tight spots like the bottom bar. Russian
+ * solfège uses the traditional marks: «Ми» (большая), «ми» (малая), «ми¹»
+ * (первая), «ми²» …, «Ми₁» (контроктава); otherwise «E4» / «mi4».
+ */
+export function compactNote(note: SpelledNote, naming: NoteNaming, lang: Lang): string {
+  const name = pitchName(note, naming, lang);
+  if (naming !== 'solfege' || lang !== 'ru') return `${name}${note.octave}`;
+  if (note.octave >= 3) return name + (RU_MARK_UP[note.octave - 3] ?? `${note.octave}`);
+  const capital = name[0].toUpperCase() + name.slice(1);
+  return capital + (RU_MARK_DOWN[2 - note.octave] ?? '');
+}

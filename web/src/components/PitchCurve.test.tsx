@@ -66,7 +66,10 @@ describe('PitchCurve', () => {
    * solid pitch strokes (each run of one zone color is also stroked once,
    * translucent, for the glow).
    */
-  function draw(frames: [number, number, boolean?][]) {
+  function draw(
+    frames: [number, number, boolean?][],
+    { stable = 60, targetMidi = null }: { stable?: number; targetMidi?: number | null } = {},
+  ) {
     const store = new PitchStore();
     render(
       <PitchCurve
@@ -74,11 +77,13 @@ describe('PitchCurve', () => {
         keySpec={{ tonic: 'C', accidental: 0, mode: 'major' }}
         naming="letter"
         zones={{ green: 10, yellow: 25 }}
+        targetMidi={targetMidi}
+        targetLabel="D4"
       />,
     );
     act(() => {
       frames.forEach(([raw, center, ready = true], i) =>
-        store.push(frame(60, raw, { centerCents: center, centerReady: ready }), i * 11),
+        store.push(frame(stable, raw, { centerCents: center, centerReady: ready }), i * 11),
       );
     });
     const pending = rafCallbacks;
@@ -125,6 +130,78 @@ describe('PitchCurve', () => {
     expect(runs.map((s) => s.color)).toEqual([ZONE_COLORS.green, ZONE_COLORS.red]);
     // The red run continues from the last green point, so the line has no gap.
     expect(runs.map((s) => s.ys.length)).toEqual([3, 3]);
+  });
+
+  describe('with a target', () => {
+    const TARGET_COLOR = '#b794ff'; // the fallback for --curve-target (jsdom has no CSS)
+    const steady: [number, number][] = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
+
+    it('colors the line by the distance from the target', () => {
+      // On C4, dead in tune, but the target is D4.
+      expect(draw(steady, { targetMidi: 62 }).map((s) => s.color)).toEqual([ZONE_COLORS.red]);
+    });
+
+    it('a hit on the target is green', () => {
+      expect(draw(steady, { stable: 62, targetMidi: 62 }).map((s) => s.color)).toEqual([
+        ZONE_COLORS.green,
+      ]);
+    });
+
+    it('a center 20 cents off the target is yellow', () => {
+      const runs = draw(
+        [
+          [0, 20],
+          [0, 20],
+        ],
+        { stable: 62, targetMidi: 62 },
+      );
+      expect(runs.map((s) => s.color)).toEqual([ZONE_COLORS.yellow]);
+    });
+
+    it('draws a labelled target line with its ± green band', () => {
+      draw(steady, { stable: 62, targetMidi: 62 });
+      const line = fake.strokes.filter((s) => s.color === TARGET_COLOR);
+      expect(line).toHaveLength(1);
+      const [y] = line[0].ys;
+      // The view centers on the target: the line is in the middle of the 200 px canvas.
+      expect(line[0].ys).toEqual([y, y]);
+      expect(y).toBeCloseTo(100, 0);
+      const band = fake.ctx.fillRect.mock.calls.find(
+        ([, top, , h]) => top < y && top + h > y && h < 10,
+      );
+      expect(band).toBeDefined();
+      const labels = (fake.ctx.fillText.mock.calls as [string, number, number][]).map(([t]) => t);
+      expect(labels).toContain('D4');
+    });
+
+    it('pins the label with an arrow when the target is out of view', () => {
+      draw(steady, { stable: 48, targetMidi: 72 });
+      expect(fake.strokes.filter((s) => s.color === TARGET_COLOR)).toHaveLength(0);
+      const labels = (fake.ctx.fillText.mock.calls as [string, number, number][]).map(([t]) => t);
+      expect(labels).toContain('▲ D4');
+    });
+
+    it('stays neutral near the target while the center is young', () => {
+      const young: [number, number, boolean][] = [
+        [0, 0, false],
+        [0, 0, false],
+      ];
+      expect(draw(young, { stable: 62, targetMidi: 62 }).map((s) => s.color)).toEqual([
+        PENDING_COLOR,
+      ]);
+    });
+
+    it('a young center far from the target is already red', () => {
+      const young: [number, number, boolean][] = [
+        [0, 0, false],
+        [0, 0, false],
+      ];
+      expect(draw(young, { targetMidi: 62 }).map((s) => s.color)).toEqual([ZONE_COLORS.red]);
+    });
   });
 
   it('stays neutral until the center of the note is ready', () => {

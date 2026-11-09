@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Drone, droneMidi } from '../audio/drone';
+import { Drone } from '../audio/drone';
 import { documentVisibility, watchVisibility, type PageVisibility } from '../audio/lifecycle';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { formatNote, octaveShort, type NoteNaming } from '../music/naming';
-import { LETTER_PC, midiToHz } from '../music/theory';
+import { targetNote } from '../music/target';
+import { midiToHz, spelledToMidi } from '../music/theory';
 import type { Settings } from '../settings';
+import { Switch } from './controls';
 import { DroneFields } from './DroneFields';
 import { DroneLeakHint } from './DroneLeakHint';
 import { DroneIcon, PlayIcon, StopIcon } from './icons';
@@ -16,6 +18,8 @@ interface Props {
   settings: Settings;
   naming: NoteNaming;
   onChange: (drone: Settings['drone']) => void;
+  /** «Бурдон играет цель»: play the target note instead of the tonic while a target is on. */
+  onDroneTargetChange?: (on: boolean) => void;
   /**
    * Called with the drone frequency when it starts playing and whenever that
    * changes, and with null when it stops (on a tap, an interruption or in the
@@ -41,6 +45,7 @@ export function DroneControls({
   settings,
   naming,
   onChange,
+  onDroneTargetChange,
   onPlayingChange,
   store,
   visibility = defaultVisibility,
@@ -52,16 +57,19 @@ export function DroneControls({
   const [on, setOn] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const { key, a4Hz } = settings;
+  const { key, a4Hz, target } = settings;
   const { volume, octave } = settings.drone;
-  const midi = droneMidi(LETTER_PC[key.tonic], key.accidental, octave);
-  const hz = midiToHz(midi, a4Hz);
-  const tonicNote = { letter: key.tonic, accidental: key.accidental, octave };
-  const label = formatNote(tonicNote, naming, lang);
+  const playsTarget = settings.droneTarget && target.enabled;
+  const droneNote = playsTarget
+    ? targetNote(key, target.degree, target.octave)
+    : { letter: key.tonic, accidental: key.accidental, octave };
+  // The analyzer is told this exact frequency, so the drone filter follows the target too.
+  const hz = midiToHz(spelledToMidi(droneNote), a4Hz);
+  const label = formatNote(droneNote, naming, lang);
   // «до · малая» fits the bottom bar on a 360 px phone; «C3» is short already.
   const shortLabel =
     naming === 'solfege' && lang === 'ru'
-      ? `${label.short} · ${octaveShort(tonicNote, naming, lang)}`
+      ? `${label.short} · ${octaveShort(droneNote, naming, lang)}`
       : label.full;
 
   useEffect(() => {
@@ -167,6 +175,14 @@ export function DroneControls({
           </span>
         </button>
         <DroneFields drone={settings.drone} keySpec={key} naming={naming} onChange={onChange} />
+        {onDroneTargetChange && (
+          <Switch
+            label={t.droneTarget}
+            checked={settings.droneTarget}
+            onChange={onDroneTargetChange}
+          />
+        )}
+        {settings.droneTarget && <p className="field-note">{t.droneTargetNote}</p>}
         <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
         {leakHint}
       </Sheet>

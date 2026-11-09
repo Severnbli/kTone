@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { PitchStore } from '../audio/pitchStore';
+import type { SpelledNote } from '../engine/types';
 import { I18nProvider } from '../i18n/I18nProvider';
 import type { Lang } from '../i18n/strings';
 import type { DegreeStyle, NoteNaming } from '../music/naming';
@@ -11,17 +12,44 @@ function setup(
   naming: NoteNaming = 'solfege',
   degreeStyle: DegreeStyle = 'roman',
   lang: Lang = 'ru',
+  target: SpelledNote | null = null,
 ) {
   const store = new PitchStore();
   render(
     <I18nProvider lang={lang}>
-      <NoteDisplay store={store} naming={naming} degreeStyle={degreeStyle} hint="hint" />
+      <NoteDisplay
+        store={store}
+        naming={naming}
+        degreeStyle={degreeStyle}
+        hint="hint"
+        target={target}
+      />
     </I18nProvider>,
   );
   return store;
 }
 
 describe('NoteDisplay', () => {
+  it('shows the target next to the sung note, outside the live region', () => {
+    const store = setup('solfege', 'roman', 'ru', { letter: 'E', accidental: 0, octave: 4 });
+    const target = screen.getByTestId('note-target');
+    expect(target).toHaveTextContent('Цель: ми первой октавы');
+    act(() => store.push(frame(69), 0));
+    expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
+    expect(target).toHaveTextContent('Цель: ми первой октавы');
+    expect(target.closest('[aria-live]')).toBeNull();
+  });
+
+  it('target in letter names', () => {
+    setup('letter', 'roman', 'en', { letter: 'G', accidental: 1, octave: 3 });
+    expect(screen.getByTestId('note-target')).toHaveTextContent('Target: G♯3');
+  });
+
+  it('no target line without a target', () => {
+    setup();
+    expect(screen.queryByTestId('note-target')).toBeNull();
+  });
+
   it('shows a placeholder and hint before any note', () => {
     setup();
     expect(screen.getByTestId('note-name')).toHaveTextContent('–');

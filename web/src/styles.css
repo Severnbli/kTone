@@ -45,6 +45,8 @@
   --curve-tonic: rgba(192, 132, 252, 0.6);
   --curve-tonic-text: #d8b4fe;
   --curve-band: rgba(62, 230, 160, 0.12);
+  --curve-target: #c9a8ff;
+  --curve-target-band: rgba(183, 148, 255, 0.16);
 
   /* Shape and space */
   --radius-s: 10px;
@@ -93,6 +95,8 @@
     --curve-tonic: rgba(109, 40, 217, 0.55);
     --curve-tonic-text: #6d28d9;
     --curve-band: rgba(10, 127, 86, 0.12);
+    --curve-target: #6d28d9;
+    --curve-target-band: rgba(109, 40, 217, 0.1);
     --shadow-1: 0 1px 2px rgba(23, 18, 43, 0.08);
     --shadow-2: 0 12px 40px rgba(23, 18, 43, 0.18);
     color-scheme: light;
@@ -124,6 +128,8 @@
   --curve-tonic: rgba(109, 40, 217, 0.55);
   --curve-tonic-text: #6d28d9;
   --curve-band: rgba(10, 127, 86, 0.12);
+  --curve-target: #6d28d9;
+  --curve-target-band: rgba(109, 40, 217, 0.1);
   --shadow-1: 0 1px 2px rgba(23, 18, 43, 0.08);
   --shadow-2: 0 12px 40px rgba(23, 18, 43, 0.18);
   color-scheme: light;
@@ -448,6 +454,18 @@ select {
   font-weight: 600;
 }
 
+.note-target {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.note-target strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .note-hz {
   margin-top: 2px;
   color: var(--muted);
@@ -488,6 +506,21 @@ select {
 
 .staff-note.inactive {
   opacity: 0.35;
+}
+
+/* Target note: a ghost head in the brand accent, outlined and see-through. */
+.staff .staff-target {
+  color: var(--accent);
+}
+
+.staff .target-head {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.staff .staff-target .ledger-line {
+  opacity: 0.8;
 }
 
 /* ---------- Cents gauge ---------- */
@@ -566,6 +599,49 @@ select {
   font-weight: 800;
   font-size: 1.15rem;
   margin-right: 2px;
+}
+
+/*
+ * Target mode, away from the target: a direction message replaces the side
+ * labels and the readout (same grid cell, so the height never changes), the
+ * needle is pinned to the edge, the arrow points where to go.
+ */
+.gauge-message {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: none;
+  justify-self: center;
+  max-width: 100%;
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.2;
+  color: var(--zone-red);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gauge[data-target='far'] .gauge-message,
+.gauge[data-target='octave'] .gauge-message {
+  display: block;
+}
+
+.gauge[data-target='far'] :is(.gauge-side, .gauge-readout),
+.gauge[data-target='octave'] :is(.gauge-side, .gauge-readout) {
+  visibility: hidden;
+}
+
+.gauge[data-dir='flat'] .gauge-message::before {
+  content: '▲ ';
+}
+
+.gauge[data-dir='sharp'] .gauge-message::before {
+  content: '▼ ';
+}
+
+.gauge[data-target='octave'] .gauge-message {
+  color: var(--zone-yellow);
 }
 
 .gauge-unit {
@@ -937,6 +1013,24 @@ select {
 .drone {
   min-width: 0;
   max-width: 100%;
+}
+
+.target {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.target-open.on {
+  color: var(--accent);
+}
+
+.target-open.on svg {
+  filter: drop-shadow(0 0 calc(6px * var(--glow-strength)) var(--accent));
+}
+
+.target-open.on .dock-btn-sub {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .start-btn {
@@ -1430,6 +1524,119 @@ input[type='number'] {
   font-family: var(--font);
   font-size: 0.32em;
   font-weight: 700;
+}
+
+/* ---------- Target sheet ---------- */
+
+.target-fields {
+  display: grid;
+  gap: var(--space-4);
+  transition: opacity 0.2s;
+}
+
+/* Off: the target a switch-on would pick, dimmed but still usable. */
+.target-fields.off {
+  opacity: 0.6;
+}
+
+.degree-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+.degree-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 56px;
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.degree-cell:hover {
+  border-color: var(--accent);
+}
+
+.degree-cell input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.degree-cell-deg {
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.degree-cell-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.degree-cell:has(input:checked) {
+  border-color: transparent;
+  background: var(--brand-gradient);
+  color: var(--on-brand);
+  box-shadow: var(--brand-glow);
+}
+
+.degree-cell:has(input:checked) .degree-cell-note {
+  color: inherit;
+}
+
+.degree-cell:has(input:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: var(--tap) 1fr var(--tap);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.stepper-btn {
+  height: var(--tap);
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-3);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  text-align: center;
+  font-weight: 650;
+}
+
+.target-preview {
+  margin: 0;
+  color: var(--muted);
+}
+
+.target-preview strong {
+  color: var(--accent);
+  font-weight: 750;
 }
 
 /* ---------- Drone sheet ---------- */

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
+import type { SpelledNote } from '../engine/types';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { formatDegree, formatNote, type DegreeStyle, type NoteNaming } from '../music/naming';
@@ -10,9 +11,11 @@ interface Props {
   naming: NoteNaming;
   degreeStyle: DegreeStyle;
   hint: string;
+  /** Target note, shown under the sung one («Цель: ми первой октавы»). */
+  target?: SpelledNote | null;
 }
 
-export function NoteDisplay({ store, naming, degreeStyle, hint }: Props) {
+export function NoteDisplay({ store, naming, degreeStyle, hint, target = null }: Props) {
   const { t, lang } = useI18n();
   const snap = useSyncExternalStore(store.subscribeNote, store.getNote);
   const hzRef = useRef<HTMLSpanElement>(null);
@@ -72,6 +75,12 @@ export function NoteDisplay({ store, naming, degreeStyle, hint }: Props) {
           </>
         )}
       </div>
+      {target && (
+        <div className="note-target" data-testid="note-target">
+          {t.targetPreview.split('{note}')[0]}
+          <strong>{formatNote(target, naming, lang).full}</strong>
+        </div>
+      )}
       <div className="note-hz">
         <span ref={hzRef} data-testid="note-hz">
           –

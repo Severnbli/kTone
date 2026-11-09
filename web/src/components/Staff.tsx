@@ -3,7 +3,7 @@ import type { ClefId, SpelledNote } from '../engine/types';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { accidentalGlyph } from '../music/naming';
-import { ledgerLines, signatureAccidental, signatureLayout } from '../music/theory';
+import { ledgerLines, signatureAccidental, signatureLayout, staffStepFor } from '../music/theory';
 
 // Geometry: one staff step (line to adjacent space) = STEP px.
 const STEP = 5;
@@ -13,6 +13,9 @@ const HEIGHT = 160;
 const SIG_X = 52;
 const SIG_DX = 9;
 const NOTE_X = 175;
+/** With a target the sung note moves left and the target's ghost sits right of it. */
+const SUNG_X_WITH_TARGET = 160;
+const TARGET_X = 202;
 const MUSIC_FONT = "'Bravura Text', 'Noto Music', 'Segoe UI Symbol', 'Apple Symbols', serif";
 
 const y = (step: number) => BOTTOM_Y - step * STEP;
@@ -44,13 +47,32 @@ export interface StaffProps {
   staffStep: number;
   active?: boolean;
   label?: string;
+  /** Target note, drawn as a ghost (outlined, accent) note head next to the sung one. */
+  target?: SpelledNote | null;
 }
 
-export function StaffView({ clef, signature, note, staffStep, active = true, label }: StaffProps) {
+/** Accidental to print before a note: only where it differs from the key signature. */
+function printedAccidental(note: SpelledNote, signature: number): string | null {
+  if (note.accidental === signatureAccidental(signature, note.letter)) return null;
+  return note.accidental === 0 ? '♮' : accidentalGlyph(note.accidental);
+}
+
+export function StaffView({
+  clef,
+  signature,
+  note,
+  staffStep,
+  active = true,
+  label,
+  target = null,
+}: StaffProps) {
   const glyph = CLEF_GLYPHS[clef];
   const sig = signatureLayout(signature, clef);
   const step = clampStep(staffStep);
-  const needsAccidental = note && note.accidental !== signatureAccidental(signature, note.letter);
+  const noteAccidental = note && printedAccidental(note, signature);
+  const noteX = target ? SUNG_X_WITH_TARGET : NOTE_X;
+  const targetStep = target ? clampStep(staffStepFor(target, clef)) : 0;
+  const targetAccidental = target && printedAccidental(target, signature);
 
   return (
     <svg
@@ -95,6 +117,42 @@ export function StaffView({ clef, signature, note, staffStep, active = true, lab
           {accidentalGlyph(g.accidental)}
         </text>
       ))}
+      {target && (
+        <g className="staff-target" data-testid="staff-target">
+          {ledgerLines(targetStep).map((s) => (
+            <line
+              key={s}
+              className="ledger-line"
+              data-testid="target-ledger-line"
+              x1={TARGET_X - 11}
+              x2={TARGET_X + 11}
+              y1={y(s)}
+              y2={y(s)}
+            />
+          ))}
+          {targetAccidental && (
+            <text
+              data-testid="target-accidental"
+              x={TARGET_X - 15}
+              y={y(targetStep) + 6}
+              fontSize={18}
+              fontFamily={MUSIC_FONT}
+              textAnchor="middle"
+            >
+              {targetAccidental}
+            </text>
+          )}
+          <ellipse
+            className="target-head"
+            data-testid="target-head"
+            cx={TARGET_X}
+            cy={y(targetStep)}
+            rx={6.5}
+            ry={4.6}
+            transform={`rotate(-20 ${TARGET_X} ${y(targetStep)})`}
+          />
+        </g>
+      )}
       {note && (
         <g className={active ? 'staff-note' : 'staff-note inactive'} data-testid="staff-note">
           {ledgerLines(step).map((s) => (
@@ -102,33 +160,33 @@ export function StaffView({ clef, signature, note, staffStep, active = true, lab
               key={s}
               className="ledger-line"
               data-testid="ledger-line"
-              x1={NOTE_X - 12}
-              x2={NOTE_X + 12}
+              x1={noteX - 12}
+              x2={noteX + 12}
               y1={y(s)}
               y2={y(s)}
             />
           ))}
-          {needsAccidental && (
+          {noteAccidental && (
             <text
               className="note-accidental-glyph"
               data-testid="note-accidental"
-              x={NOTE_X - 16}
+              x={noteX - 16}
               y={y(step) + 6}
               fontSize={20}
               fontFamily={MUSIC_FONT}
               textAnchor="middle"
             >
-              {note.accidental === 0 ? '♮' : accidentalGlyph(note.accidental)}
+              {noteAccidental}
             </text>
           )}
           <ellipse
             className="note-head"
             data-testid="note-head"
-            cx={NOTE_X}
+            cx={noteX}
             cy={y(step)}
             rx={6.5}
             ry={4.6}
-            transform={`rotate(-20 ${NOTE_X} ${y(step)})`}
+            transform={`rotate(-20 ${noteX} ${y(step)})`}
           />
         </g>
       )}
@@ -140,10 +198,11 @@ interface LiveProps {
   store: PitchStore;
   clef: ClefId;
   signature: number;
+  target?: SpelledNote | null;
 }
 
 /** Staff bound to the store; re-renders only when the displayed note changes. */
-export function Staff({ store, clef, signature }: LiveProps) {
+export function Staff({ store, clef, signature, target = null }: LiveProps) {
   const { t } = useI18n();
   const snap = useSyncExternalStore(store.subscribeNote, store.getNote);
   return (
@@ -154,6 +213,7 @@ export function Staff({ store, clef, signature }: LiveProps) {
       staffStep={snap?.staffStep ?? 0}
       active={snap?.active ?? false}
       label={t.staff}
+      target={target}
     />
   );
 }

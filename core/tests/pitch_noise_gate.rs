@@ -342,3 +342,36 @@ fn odd_noise_configs_do_not_panic() {
         assert!(gate.is_finite() && gate > 0.0);
     }
 }
+
+#[test]
+fn an_a4_change_keeps_the_floor_and_a_quiet_voice() {
+    // The floor is about the room, not the reference pitch: changing A4 in
+    // the middle of a quiet note must not drop the gate back to the default
+    // (-46 dBFS), which would silence a -50 dBFS singer for half a second.
+    let mut tracker = new_tracker();
+    run(&mut tracker, &room(secs(1.0), -70.0, 17));
+    let floor = tracker.noise_floor().expect("settled");
+    let gate = tracker.gate();
+    let quiet = to_f32(&mix(
+        &voice(secs(1.0), 69.0, -50.0),
+        &room(secs(1.0), -70.0, 18),
+    ));
+    let mut shown = Vec::new();
+    for (i, frame) in quiet.windows(FRAME).step_by(HOP).enumerate() {
+        let a4 = if i < 30 { 440.0 } else { 442.0 };
+        if let Some(p) = tracker.process(frame, a4) {
+            shown.push((i, p.stable_midi, p.center_cents));
+        }
+        assert!(
+            tracker.noise_floor().is_some_and(|f| f <= floor),
+            "frame {i}"
+        );
+        assert!(tracker.gate() <= gate, "frame {i}");
+    }
+    let pitched_after = shown.iter().filter(|(i, ..)| *i >= 30).count();
+    assert!(pitched_after >= 45, "{shown:?}");
+    assert!(shown.iter().all(|&(_, n, _)| n == 69), "{shown:?}");
+    // Judged against the new reference once the center has caught up.
+    let (_, _, late) = *shown.last().unwrap();
+    assert!((late + 7.85).abs() < 5.0, "{late}");
+}

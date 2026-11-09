@@ -97,11 +97,14 @@ impl Analyzer {
     /// Letters are indexed C=0 .. B=6, modes major=0 / minor=1,
     /// clefs treble=0, treble8vb=1, bass=2, alto=3, tenor=4.
     /// Returns false (and keeps the previous key) if the key is not supported.
+    ///
+    /// A new `a4_hz` keeps the tracker state: its history is kept at 440 Hz
+    /// and the displayed note is re-decided on the next frame, while the
+    /// noise floor is about the room, not the reference.
     pub fn configure(&mut self, tonic: u8, accidental: i8, mode: u8, clef: u8, a4_hz: f32) -> bool {
         self.clef = clef_from_index(clef);
-        if a4_hz.is_finite() && a4_hz > 0.0 && (a4_hz - self.a4_hz).abs() > f32::EPSILON {
+        if a4_hz.is_finite() && a4_hz > 0.0 {
             self.a4_hz = a4_hz;
-            self.tracker.reset();
         }
         match key_from_parts(tonic, accidental, mode) {
             Some(key) => {

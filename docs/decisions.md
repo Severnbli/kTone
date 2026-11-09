@@ -9,7 +9,7 @@
 
 ## 2026-11-08 – Pitch detector details
 
-- **Decision:** MPM with NSDF computed via an in-house radix-2 FFT autocorrelation (frame 2048 padded to 4096), key-maxima threshold 0.9, parabolic interpolation. Tracker: RMS and clarity gates, 5-frame median in the semitone domain, octave guard (a jump of 1–2 octaves must persist for 4 frames), 30-cent hysteresis on the displayed note, history reset after 4 silent frames.
+- **Decision:** MPM with NSDF computed via an in-house radix-2 FFT autocorrelation (frame 2048 padded to 4096), key-maxima threshold 0.9, parabolic interpolation. Tracker: RMS and clarity gates, 5-frame median (3 since the 2026-11-09 latency work) in the semitone domain, octave guard (a jump of 1–2 octaves must persist for 4 frames), 30-cent hysteresis on the displayed note, history reset after 4 silent frames.
 - **Why:** no runtime dependencies, no allocations per frame, sub-cent accuracy on clean signals, no octave errors in tests.
 - **Trade-offs:** a real octave leap shows up after ~40 ms; low notes (~E2) in heavy noise can be off by up to ~7 cents.
 
@@ -107,6 +107,36 @@
   | soprano tone + vibrato | 57 / 61 | 124 / 128 | 263 / 267 |
 
 - **Reading:** the detector needs most of its 43 ms frame filled with the new note, and the 5-frame median adds two hops (21 ms), so a new pitch shows up 45–65 ms after the onset, the note 60 ms after it; an octave leap waits for the octave guard. With vibrato, a step of a tone or less is shown only after ~125 ms (a trough of the new note falls back into the hysteresis band of the old one), and the center needs most of its 300 ms window. Before browser overhead, the AGENTS.md budget (≤ 50 ms, aim 30 ms) is already exceeded by the core.
+
+## 2026-11-09 – Lower latency: short window, 3-frame median, a new switching rule, center readiness
+
+- **Short window:** while the current pitch has at least 4 periods in half a frame (≥ 187.5 Hz at 48 kHz, i.e. most tenor and all soprano notes), only the newest 1024 samples are analyzed (`TrackerConfig::short_window`, on by default; never shorter than 256 samples). The full frame is used again for a jump of more than 1.5 semitones, an unclear short window, the drone check, and every note below the limit. Short and full window agree within 0.15 semitone; leaps out of the short range show no octave errors (`core/tests/pitch_short_window.rs`).
+- **Median:** 3 frames instead of 5 (one hop less delay). The octave guard (4 frames) still protects against octave errors, and the switching rule below takes over the anti-flicker role of the longer median.
+- **Switching rule** (`PitchTracker::decide_note`): within 0.5 semitone of the shown note nothing changes; a jump of more than 1.5 semitones switches at once. In between (past the band of 0.5 + 30 cents hysteresis), the note switches at once when the current note is settled (steady for 3/4 of the center window), during the transit right after an onset or a leap (first 3 frames), or for a straight tone. When the note is swinging (its center history turned by ≥ 0.2 semitone down and up again, i.e. vibrato) or not yet settled, the pitch must stay past the band for `switch_dwell` frames (60 ms, 6 at 48 kHz) or its summed excess past the band must reach 0.3 semitone. A steady (not swinging) note also switches when its center has moved more than half a semitone after a third of the window. This fixes the two ignored voice tests (`bass_c4_vibrato_does_not_flicker`, `ascending_scale_each_note_settles`): wide vibrato (up to ±0.9 semitone at 4.5–6.5 Hz) never switches, while a held pitch past the midpoint is shown as the neighbor within 0.1–0.4 s (`core/tests/pitch_switching.rs`).
+- **Center readiness:** `TrackedPitch::center_ready` (WASM slot 14, `PitchFrame.centerReady`, 15 fields) is true once the center can be judged: 3/5 of the center window is filled, or the last 6 estimates lie within 0.08 semitone (a straight tone). It latches until the note changes or the history resets. The cents gauge shows `data-zone="pending"` and the pitch curve draws in a neutral gray until then, so a note no longer starts red or yellow while the center is still catching up; the needle and readout keep moving. A test over 24 phases and several depths and rates checks that a ready center at a vibrato onset is never in the red.
+- **`?debug`:** an overlay (and a console line every 5 s) with per-frame analysis time, frames dropped by the scheduler and `baseLatency`/`outputLatency`. Measured in headless Chromium: analysis 0.3 ms mean / 1.7 ms max per frame, no drops, baseLatency 10 ms, outputLatency 40 ms (44.1 kHz).
+- **After** (same signals as the baseline; (d) is the time until `center_ready` and the zone shows):
+
+  | step | (a) midi | (b) stable | (c) center | (d) ready |
+  | --- | --- | --- | --- | --- |
+  | bass semitone up (A2→B♭2) | 39 / 43 | 49 / 53 | 49 / 53 | 103 / 107 |
+  | bass fourth down | 52 / 56 | 52 / 56 | 52 / 56 | 105 / 109 |
+  | bass E2 → G2 | 49 / 53 | 49 / 53 | 49 / 53 | 103 / 107 |
+  | tenor semitone down | 28 / 32 | 33 / 37 | 33 / 37 | 87 / 91 |
+  | tenor third up | 47 / 51 | 47 / 51 | 47 / 51 | 100 / 104 |
+  | tenor fifth up | 49 / 53 | 49 / 53 | 49 / 53 | 103 / 107 |
+  | tenor octave up | 73 / 77 | 73 / 77 | 73 / 77 | 127 / 131 |
+  | soprano semitone up | 25 / 29 | 33 / 37 | 33 / 37 | 87 / 91 |
+  | soprano sixth down | 52 / 56 | 52 / 56 | 52 / 56 | 105 / 109 |
+  | bass semitone + vibrato | 36 / 40 | 135 / 139 | 252 / 256 | 305 / 309 |
+  | bass fifth + vibrato | 49 / 53 | 49 / 53 | 156 / 160 | 220 / 224 |
+  | tenor semitone + vibrato | 25 / 29 | 124 / 128 | 241 / 245 | 295 / 299 |
+  | tenor third + vibrato | 52 / 56 | 52 / 56 | 244 / 248 | 223 / 227 |
+  | soprano tone + vibrato | 39 / 45 | 79 / 128 | 199 / 245 | 249 / 299 |
+
+  `core/tests/pitch_latency.rs` asserts bounds on these: 60 ms for (a)–(c) on straight steps (80 for the octave), 150 ms for a vibrato step of up to 2.5 semitones, 300 ms for a vibrato center, readiness within 60 ms after (b) for straight tones and 330 ms for vibrato.
+- **Trade-offs:** straight steps now show the note in 33–53 ms (was 57–67), high voices meet the 30 ms target for the raw pitch. The zone appears ~55 ms after a straight note change and ~180 ms after a vibrato one, on purpose. A semitone step with vibrato on a low voice is slightly slower than with the 3-frame median alone (135 ms vs. ~115 ms) because of the swing dwell, the price of the vibrato not flickering. The octave leap still waits for the octave guard. The TS mock engine reports `centerReady` but keeps the simple hysteresis rule. `process` stays allocation-free (`core/tests/pitch_no_alloc.rs` now also steps across the short-window limit).
+- **Alternatives considered:** a dwell of 4 frames (wide 4.5 Hz vibrato flickered); a center switch after 4 frames (wide vibrato flipped back and forth); readiness at half the window (+25 cents at 4.5 Hz ±40 cents); a smaller frame overall (loses E2 and bass accuracy, hence the pitch-dependent short window); moving the analysis into the AudioWorklet (out of scope for now, saves message passing only).
 
 ## 2026-11-09 – SEO: meta tags, crawler files and a static fallback
 

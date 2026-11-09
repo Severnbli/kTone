@@ -28,9 +28,16 @@ export interface BuildFile {
   content: string | Uint8Array;
 }
 
-/** Files that must not be precached: the worker itself, source maps, OS junk. */
+/**
+ * Files only crawlers and link previews fetch. The app never requests them, so
+ * precaching would only cost every user a download (the preview image is the
+ * biggest public file) and bump the cache version on SEO-only changes.
+ */
+export const NOT_PRECACHED = new Set(['robots.txt', 'sitemap.xml', 'og-image.png']);
+
+/** Files that must not be precached: the worker itself, crawler files, source maps, OS junk. */
 export function shouldPrecache(path: string): boolean {
-  if (path === SW_FILE) return false;
+  if (path === SW_FILE || NOT_PRECACHED.has(path)) return false;
   if (path.endsWith('.map')) return false;
   const name = path.slice(path.lastIndexOf('/') + 1);
   return !name.startsWith('.');

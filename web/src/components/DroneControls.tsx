@@ -1,17 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Drone, droneMidi } from '../audio/drone';
 import { documentVisibility, watchVisibility, type PageVisibility } from '../audio/lifecycle';
+import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { formatNote, type NoteNaming } from '../music/naming';
 import { LETTER_PC, midiToHz } from '../music/theory';
 import { DRONE_OCTAVES, type Settings } from '../settings';
+import { DroneLeakHint } from './DroneLeakHint';
 
 interface Props {
   settings: Settings;
   naming: NoteNaming;
   onChange: (drone: Settings['drone']) => void;
-  /** Called when the drone starts or stops (e.g. to hold a screen wake lock). */
-  onPlayingChange?: (playing: boolean) => void;
+  /**
+   * Called with the drone frequency when it starts playing and whenever that
+   * changes, and with null when it stops (on a tap, an interruption or in the
+   * background). Fires as soon as the drone is switched on, before its audio
+   * starts, so the analyzer knows the drone before the mic can hear it.
+   */
+  onPlayingChange?: (hz: number | null) => void;
+  /** Source of the drone leak hint. */
+  store?: PitchStore;
   visibility?: PageVisibility;
   createDrone?: () => Drone;
 }
@@ -27,6 +36,7 @@ export function DroneControls({
   naming,
   onChange,
   onPlayingChange,
+  store,
   visibility = defaultVisibility,
   createDrone = () => new Drone(),
 }: Props) {
@@ -56,8 +66,8 @@ export function DroneControls({
   const onPlayingChangeRef = useRef(onPlayingChange);
   onPlayingChangeRef.current = onPlayingChange;
   useEffect(() => {
-    onPlayingChangeRef.current?.(on);
-  }, [on]);
+    onPlayingChangeRef.current?.(on ? hz : null);
+  }, [on, hz]);
 
   const halt = useCallback((reason: 'interrupted' | null) => {
     droneRef.current?.stop();
@@ -150,6 +160,7 @@ export function DroneControls({
         </p>
       )}
       <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
+      {on && store && <DroneLeakHint store={store} />}
     </section>
   );
 }

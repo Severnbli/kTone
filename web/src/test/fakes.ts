@@ -119,7 +119,12 @@ export class FakeAudioContext extends EventTarget {
   currentTime = 0;
   resumeWorks = true;
   readonly destination = {};
-  readonly oscillators: { started: boolean; stopped: boolean }[] = [];
+  readonly oscillators: {
+    type: string;
+    frequency: { value: number };
+    started: boolean;
+    stopped: boolean;
+  }[] = [];
   resume = vi.fn(async () => {
     if (this.resumeWorks) this.state = 'running';
   });
@@ -144,7 +149,8 @@ export class FakeAudioContext extends EventTarget {
   createOscillator() {
     const osc = {
       type: '',
-      frequency: param(),
+      // Web Audio oscillators start at 440 Hz.
+      frequency: param(440),
       started: false,
       stopped: false,
       connect: (n: unknown) => n,
@@ -164,9 +170,9 @@ export class FakeAudioContext extends EventTarget {
   }
 }
 
-function param() {
+function param(value = 0) {
   return {
-    value: 0,
+    value,
     setValueAtTime: () => undefined,
     linearRampToValueAtTime: () => undefined,
     setTargetAtTime: () => undefined,

@@ -194,6 +194,15 @@ export function SettingsPanel({ settings, onChange, mediaDevices = browserMediaD
         />
       </fieldset>
 
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.droneFilter}
+          onChange={(e) => update({ droneFilter: e.target.checked })}
+        />
+        {t.droneFilter}
+      </label>
+
       <label className="field">
         <span>{t.language}</span>
         <select

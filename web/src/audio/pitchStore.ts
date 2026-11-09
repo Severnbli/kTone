@@ -15,6 +15,10 @@ export interface NoteSnapshot {
 }
 
 export const SILENCE_HOLD_MS = 350;
+/** The drone leak hint shows once the mic has heard the drone this long... */
+export const DRONE_LEAK_SHOW_MS = 1500;
+/** ... and hides when no leaking frame came for this long. */
+export const DRONE_LEAK_GAP_MS = 500;
 export const HISTORY_CAPACITY = 2048;
 
 type FrameListener = (frame: PitchFrame | null) => void;
@@ -73,8 +77,14 @@ export class PitchStore {
   private lastVoicedMs = -Infinity;
   private readonly frameListeners = new Set<FrameListener>();
   private readonly noteListeners = new Set<() => void>();
+  private leakStartMs = -Infinity;
+  private lastLeakMs = -Infinity;
+  private droneLeak = false;
+  private readonly leakListeners = new Set<() => void>();
 
-  push(frame: PitchFrame | null, timeMs: number): void {
+  /** `droneLeak`: the analyzer heard the app drone leaking into the mic in this frame. */
+  push(frame: PitchFrame | null, timeMs: number, droneLeak = false): void {
+    this.updateLeak(timeMs, droneLeak);
     this.latest = frame;
     this.history.push(timeMs, frame);
     let next = this.note;
@@ -98,7 +108,31 @@ export class PitchStore {
     this.frameListeners.forEach((l) => l(frame));
   }
 
+  /**
+   * Leaking frames that come less than `DRONE_LEAK_GAP_MS` apart form a run;
+   * the leak is reported once a run lasts `DRONE_LEAK_SHOW_MS`.
+   */
+  private updateLeak(timeMs: number, leak: boolean): void {
+    if (leak) {
+      if (timeMs - this.lastLeakMs > DRONE_LEAK_GAP_MS) this.leakStartMs = timeMs;
+      this.lastLeakMs = timeMs;
+    }
+    const active =
+      timeMs - this.lastLeakMs <= DRONE_LEAK_GAP_MS &&
+      this.lastLeakMs - this.leakStartMs >= DRONE_LEAK_SHOW_MS;
+    this.setDroneLeak(active);
+  }
+
+  private setDroneLeak(active: boolean): void {
+    if (active === this.droneLeak) return;
+    this.droneLeak = active;
+    this.leakListeners.forEach((l) => l());
+  }
+
   reset(): void {
+    this.leakStartMs = -Infinity;
+    this.lastLeakMs = -Infinity;
+    this.setDroneLeak(false);
     this.latest = null;
     this.history.clear();
     this.lastVoicedMs = -Infinity;
@@ -120,4 +154,12 @@ export class PitchStore {
   };
 
   getNote = (): NoteSnapshot | null => this.note;
+
+  subscribeDroneLeak = (listener: () => void): (() => void) => {
+    this.leakListeners.add(listener);
+    return () => this.leakListeners.delete(listener);
+  };
+
+  /** True while the mic has clearly been hearing the app drone (see `push`). */
+  getDroneLeak = (): boolean => this.droneLeak;
 }

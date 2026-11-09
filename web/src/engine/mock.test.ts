@@ -207,6 +207,92 @@ describe('mock analyzer', () => {
     });
   });
 
+  describe('drone filter', () => {
+    const D3 = 146.83;
+    /** Drone-like frame: a sine plus a weak octave (like `drone.ts`), at sample offset `at`. */
+    const droneFrame = (hz: number, at = 0) =>
+      Float32Array.from({ length: 2048 }, (_, i) => {
+        const ph = (2 * Math.PI * hz * (i + at)) / SR;
+        return 0.1 * Math.sin(ph) + 0.02 * Math.sin(2 * ph);
+      });
+    const voiceFrame = (hz: number, at = 0) => {
+      const drone = droneFrame(D3, at);
+      return Float32Array.from({ length: 2048 }, (_, i) => {
+        let v = 0;
+        for (let h = 1; h <= 6; h++) {
+          v += (0.1 / h) * Math.sin((2 * Math.PI * hz * h * (i + at)) / SR);
+        }
+        return v + 0.3 * drone[i];
+      });
+    };
+    const runFrames = (a: Analyzer, make: (at: number) => Float32Array, count = 12) =>
+      Array.from({ length: count }, (_, k) => {
+        const f = a.process(make(k * 512));
+        return { f, leak: a.droneLeak };
+      });
+
+    it('ignores the drone and flags it', async () => {
+      const a = await createMockAnalyzer(SR);
+      expect(runFrames(a, (at) => droneFrame(D3, at)).every(({ f }) => f !== null)).toBe(true);
+      a.setDrone(D3, true);
+      const out = runFrames(a, (at) => droneFrame(D3, at));
+      expect(out.every(({ f, leak }) => f === null && leak)).toBe(true);
+    });
+
+    it('still shows the drone with the filter off, but flags it', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, false);
+      const out = runFrames(a, (at) => droneFrame(D3, at));
+      expect(out.every(({ f, leak }) => f?.stableMidi === 50 && leak)).toBe(true);
+    });
+
+    it('hears a voice on the drone pitch, an octave above, and on another note', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, true);
+      for (const midi of [50, 62, 55]) {
+        const hz = 440 * 2 ** ((midi - 69) / 12);
+        const out = runFrames(a, (at) => voiceFrame(hz, at));
+        expect([midi, out.map(({ f }) => f?.stableMidi)]).toEqual([midi, Array(12).fill(midi)]);
+        expect(out.some(({ leak }) => leak)).toBe(false);
+      }
+    });
+
+    it('ignores the drone fading in and out', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, true);
+      // Linear attack over 0.4 s from silence, like `drone.ts`, then a release.
+      const gain = (i: number) => Math.min(1, i / (0.4 * SR), Math.max(0, (SR - i) / (0.3 * SR)));
+      const out = runFrames(
+        a,
+        (at) => {
+          const f = droneFrame(D3, at);
+          return f.map((v, i) => v * gain(at + i) + 1e-4 * Math.sin(i * 7.1));
+        },
+        90,
+      );
+      expect(out.filter(({ f }) => f !== null)).toEqual([]);
+    });
+
+    it('ignores a drone heard once the stream starts mid-frame', async () => {
+      const a = await createMockAnalyzer(SR);
+      a.setDrone(D3, true);
+      // The first blocks of a microphone stream are exact zeros.
+      const out = runFrames(a, (at) => droneFrame(D3, at).map((v, i) => (at + i < 2600 ? 0 : v)));
+      expect(out.filter(({ f }) => f !== null)).toEqual([]);
+      expect(out.at(-1)?.leak).toBe(true);
+    });
+
+    it('treats null, zero and NaN as no drone', async () => {
+      const a = await createMockAnalyzer(SR);
+      for (const off of [null, 0, NaN]) {
+        a.setDrone(D3, true);
+        a.setDrone(off, true);
+        const out = runFrames(a, (at) => droneFrame(D3, at), 3);
+        expect(out.every(({ f, leak }) => f?.stableMidi === 50 && !leak)).toBe(true);
+      }
+    });
+  });
+
   it('detectPitch returns null below the threshold', () => {
     expect(detectPitch(new Float32Array(2048).fill(0.3), SR)).toBeNull();
   });

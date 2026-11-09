@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Drone, droneMidi } from '../audio/drone';
 import { BACKGROUND_STOP_MS } from '../audio/lifecycle';
+import { DRONE_LEAK_GAP_MS, DRONE_LEAK_SHOW_MS, PitchStore } from '../audio/pitchStore';
 import { DEFAULT_SETTINGS } from '../settings';
 import { FakeAudioContext, fakeVisibility, flush } from '../test/fakes';
 import { DroneControls } from './DroneControls';
@@ -27,6 +28,55 @@ describe('DroneControls', () => {
     expect(onChange).toHaveBeenLastCalledWith({ volume: 0.3, octave: 4 });
     fireEvent.change(screen.getByLabelText('Громкость'), { target: { value: '0.8' } });
     expect(onChange).toHaveBeenLastCalledWith({ volume: 0.8, octave: 3 });
+  });
+
+  it('reports the playing frequency and shows the leak hint while the mic hears the drone', () => {
+    const store = new PitchStore();
+    const onPlayingChange = vi.fn();
+    const { rerender } = render(
+      <DroneControls
+        settings={DEFAULT_SETTINGS}
+        naming="solfege"
+        onChange={() => undefined}
+        onPlayingChange={onPlayingChange}
+        store={store}
+      />,
+    );
+    expect(onPlayingChange).toHaveBeenLastCalledWith(null);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    // C3 at A4 = 440.
+    expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(130.81, 2));
+    rerender(
+      <DroneControls
+        settings={{ ...DEFAULT_SETTINGS, a4Hz: 442 }}
+        naming="solfege"
+        onChange={() => undefined}
+        onPlayingChange={onPlayingChange}
+        store={store}
+      />,
+    );
+    expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(131.4, 1));
+
+    const hint = () => screen.queryByTestId('drone-leak-hint');
+    let t = 0;
+    const push = (ms: number, leak: boolean) => {
+      act(() => {
+        for (const end = t + ms; t < end; t += 10) store.push(null, t, leak);
+      });
+    };
+    push(DRONE_LEAK_SHOW_MS - 100, true);
+    expect(hint()).toBeNull();
+    push(200, true);
+    expect(hint()).toHaveTextContent('Микрофон слышит бурдон');
+    push(DRONE_LEAK_GAP_MS + 20, false);
+    expect(hint()).toBeNull();
+
+    push(DRONE_LEAK_SHOW_MS + 100, true);
+    expect(hint()).not.toBeNull();
+    fireEvent.click(btn);
+    expect(hint()).toBeNull();
+    expect(onPlayingChange).toHaveBeenLastCalledWith(null);
   });
 
   describe('lifecycle', () => {
@@ -58,12 +108,16 @@ describe('DroneControls', () => {
       expect(btn).toHaveAttribute('aria-pressed', 'true');
     }
 
-    it('reports playing changes', async () => {
-      const { btn, onPlayingChange } = setup();
-      await turnOn(btn);
-      expect(onPlayingChange).toHaveBeenLastCalledWith(true);
+    it('reports the drone before its audio starts, and null when it stops', async () => {
+      const { btn, ctx, onPlayingChange } = setup();
+      // The analyzer must know the drone before the mic can hear it.
       fireEvent.click(btn);
-      expect(onPlayingChange).toHaveBeenLastCalledWith(false);
+      expect(ctx.oscillators).toHaveLength(0);
+      expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(130.81, 2));
+      await act(() => flush());
+      expect(ctx.oscillators.length).toBeGreaterThan(0);
+      fireEvent.click(btn);
+      expect(onPlayingChange).toHaveBeenLastCalledWith(null);
     });
 
     it('resumes after a system pause when possible', async () => {
@@ -78,7 +132,7 @@ describe('DroneControls', () => {
     });
 
     it('stops and explains when the pause cannot be undone', async () => {
-      const { btn, ctx } = setup();
+      const { btn, ctx, onPlayingChange } = setup();
       await turnOn(btn);
       ctx.resumeWorks = false;
       await act(async () => {
@@ -86,6 +140,7 @@ describe('DroneControls', () => {
         await flush();
       });
       expect(btn).toHaveAttribute('aria-pressed', 'false');
+      expect(onPlayingChange).toHaveBeenLastCalledWith(null);
       expect(screen.getByTestId('drone-interrupted')).toHaveTextContent('Бурдон остановлен');
 
       // Tapping again (a user gesture) restarts it and clears the message.

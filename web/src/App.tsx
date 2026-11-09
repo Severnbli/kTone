@@ -120,8 +120,11 @@ function Main({
   useEffect(() => {
     wakeLockRef.current?.set('mic', status === 'running');
   }, [status]);
-  const onDronePlaying = useCallback((playing: boolean) => {
-    wakeLockRef.current?.set('drone', playing);
+  // The drone the analyzer must not take for a voice (null while it is off).
+  const [droneHz, setDroneHz] = useState<number | null>(null);
+  const onDronePlaying = useCallback((hz: number | null) => {
+    wakeLockRef.current?.set('drone', hz !== null);
+    setDroneHz(hz);
   }, []);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -140,6 +143,10 @@ function Main({
       setStatus(err instanceof MicError ? err.code : 'engine');
     });
   }, [micDeviceId]);
+
+  useEffect(() => {
+    engineRef.current?.setDrone(droneHz, settings.droneFilter);
+  }, [droneHz, settings.droneFilter]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -261,6 +268,7 @@ function Main({
             naming={settings.naming}
             onChange={(drone) => setSettings({ ...settings, drone })}
             onPlayingChange={onDronePlaying}
+            store={store}
             visibility={visibility}
           />
         </div>

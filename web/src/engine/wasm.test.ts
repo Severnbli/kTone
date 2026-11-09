@@ -70,6 +70,21 @@ describe.skipIf(!hasWasm)('WASM engine adapter', () => {
     a.dispose();
   });
 
+  it('passes the drone through and reports leaks', async () => {
+    const a = await load();
+    a.configure(settings());
+    a.setDrone(440, true);
+    expect(feedSine(a, 440)).toBeNull();
+    expect(a.droneLeak).toBe(true);
+    a.setDrone(440, false);
+    expect(feedSine(a, 440)?.stableMidi).toBe(69);
+    expect(a.droneLeak).toBe(true);
+    a.setDrone(null, true);
+    expect(feedSine(a, 440)?.stableMidi).toBe(69);
+    expect(a.droneLeak).toBe(false);
+    a.dispose();
+  });
+
   it('returns null for silence and lists 30 keys with signatures', async () => {
     const a = await load();
     expect(a.process(new Float32Array(a.frameSize))).toBeNull();

@@ -1,7 +1,8 @@
 // Soft drone on the tonic: a sine plus a quiet low-passed triangle an octave
 // up, with slow attack/release. Uses its own AudioContext so it works without
 // the microphone. The mic is captured with echo cancellation off, so the drone
-// can leak into detection through speakers; the UI recommends headphones.
+// can leak into detection through speakers: the drone filter (PitchTracker::set_drone)
+// ignores it and the UI hints at headphones when the mic keeps hearing it.
 // When the system pauses the context (phone call, Siri, background) the drone
 // reports it via `onPause`; the owner decides whether to `resume()` or stop.
 
@@ -71,9 +72,12 @@ export class Drone {
     fundamental.connect(master);
     upper.connect(upperGain).connect(lowpass).connect(master);
 
+    // Set the pitch directly: a ramp would glide up from the 440 Hz default,
+    // and the mic would hear (and show) the glide.
+    fundamental.frequency.value = frequencyHz;
+    upper.frequency.value = frequencyHz * 2;
     this.master = master;
     this.oscs = [fundamental, upper];
-    this.setFrequency(frequencyHz);
     this.oscs.forEach((o) => o.start(t));
   }
 

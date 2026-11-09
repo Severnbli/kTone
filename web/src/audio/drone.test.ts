@@ -54,6 +54,16 @@ describe('Drone', () => {
     expect(ctx.oscillators).toHaveLength(0);
   });
 
+  it('starts at its pitch instead of gliding from 440 Hz', async () => {
+    const { ctx, drone } = setup();
+    await drone.start(146.83, 0.3);
+    expect(ctx.oscillators.map((o) => [o.type, o.frequency.value])).toEqual([
+      ['sine', 146.83],
+      ['triangle', 293.66],
+    ]);
+    expect(drone.playing).toBe(true);
+  });
+
   it('is a no-op without AudioContext', async () => {
     const drone = new Drone(() => null);
     await drone.start(220, 0.3);

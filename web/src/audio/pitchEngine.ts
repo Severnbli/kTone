@@ -44,6 +44,7 @@ export class PitchEngine {
   private analyzer: Analyzer | null = null;
   private mic: MicSession | null = null;
   private settings: AnalyzerSettings | null = null;
+  private drone: { hz: number | null; filter: boolean } = { hz: null, filter: true };
   private generation = 0;
   private current: EngineState = { status: 'idle', stopReason: null };
   private readonly listeners = new Set<(state: EngineState) => void>();
@@ -98,6 +99,7 @@ export class PitchEngine {
       return;
     }
     analyzer.configure(this.settings);
+    analyzer.setDrone(this.drone.hz, this.drone.filter);
     this.analyzer = analyzer;
     this.mic = mic;
     this.store.reset();
@@ -106,7 +108,7 @@ export class PitchEngine {
     scheduler = new FrameScheduler(analyzer.frameSize, analyzer.hopSize, (frame) => {
       const now = this.deps.now();
       const result = analyzer.process(frame);
-      this.store.push(result, now);
+      this.store.push(result, now, analyzer.droneLeak);
       levels?.push(frame, result !== null, now);
     });
     this.unwatch = watchVisibility(this.deps.visibility ?? documentVisibility(), {
@@ -129,6 +131,15 @@ export class PitchEngine {
   configure(settings: AnalyzerSettings): void {
     this.settings = settings;
     this.analyzer?.configure(settings);
+  }
+
+  /**
+   * The drone the app plays (`null`: none) and whether to filter it out of
+   * detection. Safe to call at any time; keeps the analyzer state.
+   */
+  setDrone(hz: number | null, filter: boolean): void {
+    this.drone = { hz, filter };
+    this.analyzer?.setDrone(hz, filter);
   }
 
   /**

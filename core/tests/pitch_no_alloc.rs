@@ -52,8 +52,17 @@ fn detect_and_process_do_not_allocate() {
         .map(|i| 0.3 * (std::f32::consts::TAU * 440.0 * i as f32 / sr).sin())
         .collect();
 
+    // The drone check (least-squares fit) runs for frames on the drone pitch.
+    let drone: Vec<f32> = (0..24000)
+        .map(|i| {
+            let ph = std::f32::consts::TAU * 220.0 * i as f32 / sr;
+            0.2 * ph.sin() + 0.04 * (2.0 * ph).sin()
+        })
+        .collect();
+
     let mut mpm = Mpm::new(sr, n);
     let mut tracker = PitchTracker::new(sr, n, TrackerConfig::default());
+    let mut drone_tracker = PitchTracker::new(sr, n, TrackerConfig::default());
 
     let before = allocations();
     let mut pitched = 0;
@@ -65,6 +74,23 @@ fn detect_and_process_do_not_allocate() {
             pitched += 1;
         }
     }
+    drone_tracker.set_drone(Some(220.0), true);
+    let mut leaks = 0;
+    for frame in drone
+        .windows(n)
+        .step_by(512)
+        .chain(signal.windows(n).step_by(512))
+    {
+        let _ = drone_tracker.process(frame, 440.0);
+        if drone_tracker.drone_leak() {
+            leaks += 1;
+        }
+        if mpm.detect(frame).is_some() {
+            let _ = mpm.periodic_residual(&[220.0, 440.0, 1320.0, 2200.0], 48000.0 / 220.0);
+            let _ = mpm.residual_at(109.0);
+        }
+    }
+    drone_tracker.set_drone(Some(221.0), false);
     for frame in [&silence[..], &nan[..], &octave_up[..], &signal[..n - 1]] {
         let _ = mpm.detect(frame);
         let _ = tracker.process(frame, 440.0);
@@ -74,5 +100,6 @@ fn detect_and_process_do_not_allocate() {
     let after = allocations();
 
     assert!(pitched > 100);
+    assert!(leaks > 20);
     assert_eq!(after - before, 0, "allocated on the hot path");
 }

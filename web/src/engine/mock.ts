@@ -2,7 +2,7 @@
 // fallback. Pitch detection is a plain YIN (cumulative mean normalized
 // difference); spelling is simple and key-aware: diatonic notes use the key's
 // spelling, chromatic notes use sharps in sharp keys (and C/a) and flats in flat
-// keys.
+// keys. The drone filter is a port of the Rust one (see `droneCheck.ts`).
 
 import type {
   Analyzer,
@@ -14,6 +14,7 @@ import type {
   SpelledNote,
 } from './types';
 import { ALL_KEYS, DEFAULT_KEY } from '../music/keys';
+import { DroneChecker } from './droneCheck';
 import { LETTER_PC, hzToMidi, keySignature, mod, scaleOf, staffStepFor } from '../music/theory';
 
 export const FRAME_SIZE = 2048;
@@ -29,6 +30,26 @@ const HYSTERESIS_CENTS = 15;
 const CENTER_WINDOW_SECS = 0.3;
 /** Unpitched frames in a row after which the center history is dropped. */
 const GAP_RESET_FRAMES = 4;
+/** Samples at or below this magnitude are digital silence (as in the Rust core). */
+const DIGITAL_SILENCE = 1e-6;
+/**
+ * Frames that start or end with this many silent samples are not analyzed:
+ * the stream had not started yet or dropped out (`MIN_SILENT_RUN` in the core).
+ */
+const MIN_SILENT_RUN = 16;
+
+/** True when `frame` starts or ends with `MIN_SILENT_RUN` digitally silent samples. */
+export function hasSilentEdge(frame: Float32Array): boolean {
+  const n = frame.length;
+  if (n < MIN_SILENT_RUN) return false;
+  let lead = true;
+  let trail = true;
+  for (let i = 0; i < MIN_SILENT_RUN; i++) {
+    lead &&= Math.abs(frame[i]) <= DIGITAL_SILENCE;
+    trail &&= Math.abs(frame[n - 1 - i]) <= DIGITAL_SILENCE;
+  }
+  return lead || trail;
+}
 
 const SHARP_NAMES: [Letter, number][] = [
   ['C', 0],
@@ -133,8 +154,13 @@ class MockAnalyzer implements Analyzer {
   private centerLen = 0;
   private centerPos = 0;
   private invalidRun = 0;
+  private droneHz = 0;
+  private droneFilter = false;
+  private readonly droneChecker: DroneChecker;
+  droneLeak = false;
 
   constructor(private readonly sampleRate: number) {
+    this.droneChecker = new DroneChecker(sampleRate, FRAME_SIZE);
     const frames = Math.round((CENTER_WINDOW_SECS * sampleRate) / HOP_SIZE);
     this.centerHist = new Float64Array(Math.max(1, Math.min(255, frames || 1)));
   }
@@ -145,6 +171,11 @@ class MockAnalyzer implements Analyzer {
       this.clearCenter();
     }
     this.settings = { ...settings, key: { ...settings.key } };
+  }
+
+  setDrone(hz: number | null, filter: boolean): void {
+    this.droneHz = hz !== null && Number.isFinite(hz) && hz > 0 ? hz : 0;
+    this.droneFilter = filter;
   }
 
   private clearCenter(): void {
@@ -180,14 +211,25 @@ class MockAnalyzer implements Analyzer {
     if (frame.length !== this.frameSize) {
       throw new Error(`frame.length must be ${this.frameSize}, got ${frame.length}`);
     }
+    this.droneLeak = false;
     let energy = 0;
     for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
     const rms = Math.sqrt(energy / frame.length);
-    if (rms < SILENCE_RMS) return this.unpitched();
+    if (rms < SILENCE_RMS || hasSilentEdge(frame)) return this.unpitched();
     const pitch = detectPitch(frame, this.sampleRate, this.diff);
     if (!pitch) return this.unpitched();
+    let [frequencyHz] = pitch;
+    const clarity = pitch[1];
+    if (this.droneHz > 0) {
+      const verdict = this.droneChecker.check(frame, frequencyHz, this.droneHz);
+      if (verdict === 'drone') {
+        this.droneLeak = true;
+        if (this.droneFilter) return this.unpitched();
+      } else if (verdict === 'voiceOctaveUp' && this.droneFilter && 2 * frequencyHz <= MAX_HZ) {
+        frequencyHz *= 2;
+      }
+    }
     this.invalidRun = 0;
-    const [frequencyHz, clarity] = pitch;
     const midi = hzToMidi(frequencyHz, this.settings.a4Hz);
     if (
       this.stableMidi === null ||
@@ -232,6 +274,7 @@ class MockAnalyzer implements Analyzer {
 
   dispose(): void {
     this.stableMidi = null;
+    this.droneLeak = false;
     this.clearCenter();
   }
 }

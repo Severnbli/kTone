@@ -124,3 +124,48 @@ fn lists_keys_and_signatures() {
     assert_eq!(key_signature(5, 0, 1), 0); // A minor
     assert_eq!(key_signature(4, 1, 0), 0); // unsupported -> 0
 }
+
+/// Counts `(pitched, drone_leak)` frames over a steady tone with harmonics.
+fn count(a: &mut Analyzer, freq: f32, harmonics: &[f32]) -> (usize, usize) {
+    let mut out = vec![0.0; FRAME_FIELDS];
+    let (mut pitched, mut leaks) = (0, 0);
+    for hop in 0..20 {
+        let frame: Vec<f32> = (0..FRAME)
+            .map(|i| {
+                let ph = std::f32::consts::TAU * freq * (i + hop * HOP) as f32 / SR;
+                harmonics
+                    .iter()
+                    .enumerate()
+                    .map(|(k, h)| 0.2 * h * ((k + 1) as f32 * ph).sin())
+                    .sum()
+            })
+            .collect();
+        if a.process(&frame, &mut out) {
+            pitched += 1;
+        }
+        if a.drone_leak() {
+            leaks += 1;
+        }
+    }
+    (pitched, leaks)
+}
+
+#[test]
+fn drone_filter_ignores_the_drone_but_not_a_voice() {
+    let drone = [1.0, 0.2];
+    let voice = [1.0, 0.6, 0.4, 0.3, 0.2];
+    let mut a = Analyzer::new(SR, FRAME, HOP);
+    assert_eq!(count(&mut a, 220.0, &drone), (20, 0));
+
+    a.set_drone(220.0, true);
+    assert_eq!(count(&mut a, 220.0, &drone), (0, 20));
+    assert_eq!(count(&mut a, 220.0, &voice), (20, 0));
+
+    a.set_drone(220.0, false);
+    assert_eq!(count(&mut a, 220.0, &drone), (20, 20));
+
+    for off in [0.0, -1.0, f32::NAN] {
+        a.set_drone(off, true);
+        assert_eq!(count(&mut a, 220.0, &drone), (20, 0));
+    }
+}

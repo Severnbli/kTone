@@ -19,6 +19,8 @@ export interface Settings {
   degreeStyle: DegreeStyle;
   zones: ZoneThresholds;
   drone: { volume: number; octave: number };
+  /** Do not show the drone leaking from the speakers into the mic as a sung note. */
+  droneFilter: boolean;
   /** Audio input `deviceId`; `''` is the system default. */
   micDeviceId: string;
 }
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   degreeStyle: 'roman',
   zones: { green: 10, yellow: 25 },
   drone: { volume: 0.3, octave: 3 },
+  droneFilter: true,
   micDeviceId: '',
 };
 
@@ -70,6 +73,7 @@ export function sanitizeSettings(raw: unknown): Settings {
         ? (droneRaw.octave as number)
         : d.drone.octave,
     },
+    droneFilter: typeof r.droneFilter === 'boolean' ? r.droneFilter : d.droneFilter,
     micDeviceId:
       typeof r.micDeviceId === 'string' && r.micDeviceId.length <= MAX_DEVICE_ID_LENGTH
         ? r.micDeviceId

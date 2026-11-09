@@ -102,6 +102,17 @@ describe('settings persistence', () => {
     expect(s.drone).toEqual({ volume: 1, octave: 3 });
   });
 
+  it('keeps the drone filter on unless it was switched off', () => {
+    expect(DEFAULT_SETTINGS.droneFilter).toBe(true);
+    expect(sanitizeSettings({ droneFilter: false }).droneFilter).toBe(false);
+    expect(sanitizeSettings({ droneFilter: 'no' }).droneFilter).toBe(true);
+    // Settings saved before the filter existed.
+    expect(sanitizeSettings({ drone: { volume: 0.5, octave: 4 } }).droneFilter).toBe(true);
+    const s = new MemoryStorage();
+    saveSettings({ ...DEFAULT_SETTINGS, droneFilter: false }, s);
+    expect(loadSettings(s).droneFilter).toBe(false);
+  });
+
   it('keeps a string device id and drops anything else', () => {
     expect(DEFAULT_SETTINGS.micDeviceId).toBe('');
     expect(sanitizeSettings({ micDeviceId: 'abc' }).micDeviceId).toBe('abc');

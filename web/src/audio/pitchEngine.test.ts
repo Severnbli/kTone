@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockAnalyzer } from '../engine/mock';
-import type { AnalyzerSettings } from '../engine/types';
+import type { Analyzer, AnalyzerSettings } from '../engine/types';
 import { fakeMic, fakeVisibility, flush } from '../test/fakes';
 import { LevelStore } from './level';
 import { MicError, classifyMicError } from './mic';
@@ -37,6 +37,71 @@ describe('PitchEngine', () => {
     expect(mic.stop).toHaveBeenCalled();
     expect(engine.running).toBe(false);
     expect(store.getNote()).toBeNull();
+  });
+
+  it('passes the drone to the analyzer and its leak flag to the store', async () => {
+    const mic = fakeMic();
+    const store = new PitchStore();
+    const push = vi.spyOn(store, 'push');
+    let analyzer: Analyzer | null = null;
+    let t = 0;
+    const engine = new PitchEngine(store, {
+      factory: async (sr) => (analyzer = await createMockAnalyzer(sr)),
+      startMic: mic.startMic,
+      now: () => (t += 10),
+    });
+    // Set before start: applied when the analyzer is created.
+    engine.setDrone(440, true);
+    await engine.start(settings);
+    const setDrone = vi.spyOn(analyzer!, 'setDrone');
+    mic.feedSine(440, 2048 + 512);
+    expect(push).toHaveBeenLastCalledWith(null, expect.any(Number), true);
+    expect(store.getNote()).toBeNull();
+
+    engine.setDrone(440, false);
+    expect(setDrone).toHaveBeenLastCalledWith(440, false);
+    mic.feedSine(440, 512);
+    expect(push).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stableMidi: 69 }),
+      expect.any(Number),
+      true,
+    );
+
+    engine.setDrone(null, true);
+    mic.feedSine(440, 512);
+    expect(push).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stableMidi: 69 }),
+      expect.any(Number),
+      false,
+    );
+    await engine.stop();
+  });
+
+  it('keeps the drone across a mic restart', async () => {
+    const mic = fakeMic();
+    const analyzers: Analyzer[] = [];
+    const engine = new PitchEngine(new PitchStore(), {
+      factory: async (sr) => {
+        const a = await createMockAnalyzer(sr);
+        vi.spyOn(a, 'setDrone');
+        analyzers.push(a);
+        return a;
+      },
+      startMic: mic.startMic,
+      now: () => 0,
+    });
+    await engine.start(settings);
+    engine.setDrone(220, false);
+    // A device change and a failed resume both open a new session and analyzer.
+    await engine.setDevice('usb-1');
+    mic.setResumeWorks(false);
+    mic.setState('suspended');
+    await flush();
+    await engine.resume();
+    expect(analyzers).toHaveLength(3);
+    expect(analyzers[1].setDrone).toHaveBeenLastCalledWith(220, false);
+    expect(analyzers[2].setDrone).toHaveBeenLastCalledWith(220, false);
+    await engine.stop();
   });
 
   it('measures the input level of every frame, pitched or not', async () => {

@@ -54,10 +54,13 @@ export function Switch({
   label,
   checked,
   onChange,
+  autoFocus = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  /** Take the focus when the surrounding sheet opens. */
+  autoFocus?: boolean;
 }) {
   return (
     <label className="switch-row">
@@ -67,6 +70,7 @@ export function Switch({
         role="switch"
         className="switch"
         checked={checked}
+        data-autofocus={autoFocus || undefined}
         onChange={(e) => onChange(e.target.checked)}
       />
     </label>

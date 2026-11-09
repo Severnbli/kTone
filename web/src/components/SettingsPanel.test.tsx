@@ -35,6 +35,7 @@ describe('SettingsPanel', () => {
       'Нотация',
       'Точность',
       'Интерфейс',
+      'О kTone',
     ]);
     expect(screen.queryByLabelText('Тональность')).toBeNull();
     expect(screen.queryByLabelText('Ключ')).toBeNull();

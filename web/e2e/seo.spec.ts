@@ -28,6 +28,10 @@ test('the head carries title, description, canonical and link preview tags', asy
   expect(data['@type']).toBe('WebApplication');
   expect(data.url).toBe(`${SITE}/`);
   expect(data.offers.price).toBe('0');
+  expect(data.sameAs).toBe('https://github.com/Severnbli/kTone');
+  expect(data.isBasedOn['@type']).toBe('SoftwareSourceCode');
+  expect(data.isBasedOn.codeRepository).toBe('https://github.com/Severnbli/kTone');
+  expect(data.license).toContain('gpl-3.0');
 
   // The preview image is served as a real PNG.
   const image = await page.request.get('/og-image.png');
@@ -39,6 +43,7 @@ test('the static fallback is in the HTML and replaced by the app', async ({ page
   const html = await (await page.request.get('/')).text();
   expect(html).toContain('class="seo-fallback"');
   expect(html).toContain('<h1>kTone – тюнер для голоса</h1>');
+  expect(html).toContain('<a href="https://github.com/Severnbli/kTone">');
 
   await page.goto('/');
   await expect(page.getByTestId('start-stop')).toBeVisible();

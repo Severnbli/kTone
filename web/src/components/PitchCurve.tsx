@@ -3,6 +3,7 @@ import type { KeySpec } from '../engine/types';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { pitchName, type NoteNaming } from '../music/naming';
+import { viewCenter } from '../music/target';
 import { mod, scaleOf } from '../music/theory';
 import { ZONE_COLORS, classifyCents, type Zone, type ZoneThresholds } from '../zones';
 
@@ -16,6 +17,8 @@ const LABEL_GAP = FONT_PX + 5;
 const LABEL_PRIORITY = [0, 3, 2, 3, 1, 3, 3];
 /** Gaps longer than this break the line. */
 const MAX_GAP_MS = 120;
+/** With a target, the sung pitch is kept at least this far (semitones) inside the view. */
+const VIEW_MARGIN = 1.5;
 /** Line color while the center of a new note is not ready (fallback for `--muted`). */
 export const PENDING_COLOR = '#8a8f98';
 
@@ -24,6 +27,10 @@ interface Props {
   keySpec: KeySpec;
   naming: NoteNaming;
   zones: ZoneThresholds;
+  /** MIDI number of the target note; null: measure from the nearest semitone. */
+  targetMidi?: number | null;
+  /** Label drawn on the target line («ми¹»). */
+  targetLabel?: string;
 }
 
 /** A zone, or `pending`: the center of the note is too young to judge. */
@@ -35,6 +42,8 @@ interface Palette {
   tonicText: string;
   text: string;
   band: string;
+  target: string;
+  targetBand: string;
   /** Line colors: the zones, and `pending` while the center is not ready. */
   zones: Record<Shade, string>;
 }
@@ -48,6 +57,8 @@ function readPalette(el: HTMLElement): Palette {
     tonicText: v('--curve-tonic-text', '#888'),
     text: v('--muted', '#888'),
     band: v('--curve-band', '#22a55926'),
+    target: v('--curve-target', '#b794ff'),
+    targetBand: v('--curve-target-band', '#b794ff29'),
     zones: {
       green: v('--zone-green', ZONE_COLORS.green),
       yellow: v('--zone-yellow', ZONE_COLORS.yellow),
@@ -84,7 +95,14 @@ function placeLabels(candidates: Label[], height: number, out: Label[]): Label[]
  * first wide and translucent (the "neon" glow), then thin and solid. This is
  * far cheaper than `shadowBlur` and keeps the stroke count low.
  */
-export function PitchCurve({ store, keySpec, naming, zones }: Props) {
+export function PitchCurve({
+  store,
+  keySpec,
+  naming,
+  zones,
+  targetMidi = null,
+  targetLabel = '',
+}: Props) {
   const { t, lang } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -142,10 +160,14 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
 
       const newest = h.size > 0 ? h.time[h.at(h.size - 1)] : 0;
       const latest = store.latest;
-      // Follow the stable note smoothly; keep the last center through silence.
-      const target = latest ? latest.stableMidi : center;
-      if (Number.isFinite(target)) {
-        center = Number.isFinite(center) ? center + (target - center) * 0.08 : target;
+      // Follow the stable note (or the target) smoothly; keep the last center through silence.
+      const goal = latest
+        ? viewCenter(latest.stableMidi, targetMidi, HALF_RANGE - VIEW_MARGIN)
+        : Number.isFinite(center) || targetMidi === null
+          ? center
+          : targetMidi;
+      if (Number.isFinite(goal)) {
+        center = Number.isFinite(center) ? center + (goal - center) * 0.08 : goal;
       }
       const c = Number.isFinite(center) ? center : 69;
       const plotW = width - LABEL_W;
@@ -175,8 +197,32 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         ctx.fillText(labels[l.deg], 4, l.y);
       }
 
-      // Target band around the current stable note.
-      if (latest) {
+      // With a target: its ± green band, line and label, pinned to the edge when off view.
+      if (targetMidi !== null) {
+        const top = yOf(targetMidi + zones.green / 100);
+        const bottom = yOf(targetMidi - zones.green / 100);
+        ctx.fillStyle = palette.targetBand;
+        ctx.fillRect(LABEL_W, top, plotW, bottom - top);
+        const ty = yOf(targetMidi);
+        const edge = FONT_PX / 2 + 2;
+        const inView = ty >= 0 && ty <= height;
+        if (inView) {
+          ctx.strokeStyle = palette.target;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(LABEL_W, ty);
+          ctx.lineTo(width, ty);
+          ctx.stroke();
+        }
+        const ly = Math.min(height - edge, Math.max(edge, ty));
+        const arrow = inView ? '' : ty < 0 ? '▲ ' : '▼ ';
+        ctx.font = `700 ${FONT_PX}px system-ui, sans-serif`;
+        ctx.fillStyle = palette.target;
+        ctx.textAlign = 'right';
+        ctx.fillText(`${arrow}${targetLabel}`, width - 4, inView ? ly - FONT_PX * 0.75 : ly);
+        ctx.textAlign = 'left';
+      } else if (latest) {
+        // Band around the current stable note.
         const top = yOf(latest.stableMidi + zones.green / 100);
         const bottom = yOf(latest.stableMidi - zones.green / 100);
         ctx.fillStyle = palette.band;
@@ -184,8 +230,9 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
       }
 
       // Raw pitch line (vibrato stays visible), colored by the accuracy of the
-      // vibrato center relative to the stable note, in runs of one color;
-      // neutral until the center of a new note is ready.
+      // vibrato center relative to the stable note (or the target), in runs of
+      // one color; neutral until the center of a new note is ready (except, with
+      // a target, more than half a semitone away from it).
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       let runZone: Shade | null = null;
@@ -219,9 +266,12 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
         const xx = xOf(time);
         const yy = yOf(midi);
         if (Number.isFinite(prevX) && time - prevT <= MAX_GAP_MS) {
-          const zone: Shade = h.centerReady[idx]
-            ? classifyCents(h.centerCents[idx], zones)
-            : 'pending';
+          const dev =
+            targetMidi === null
+              ? h.centerCents[idx]
+              : (h.stable[idx] - targetMidi) * 100 + h.centerCents[idx];
+          const ready = h.centerReady[idx] || (targetMidi !== null && Math.abs(dev) >= 50);
+          const zone: Shade = ready ? classifyCents(dev, zones) : 'pending';
           if (zone !== runZone) {
             strokeRun();
             runZone = zone;
@@ -262,7 +312,7 @@ export function PitchCurve({ store, keySpec, naming, zones }: Props) {
       mq?.removeEventListener?.('change', onScheme);
       themeObserver?.disconnect();
     };
-  }, [store, keySpec, naming, lang, zones]);
+  }, [store, keySpec, naming, lang, zones, targetMidi, targetLabel]);
 
   return (
     <canvas

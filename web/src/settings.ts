@@ -2,6 +2,7 @@ import type { ClefId, KeySpec } from './engine/types';
 import type { Lang } from './i18n/strings';
 import { ALL_KEYS, DEFAULT_KEY } from './music/keys';
 import type { DegreeStyle, NoteNaming } from './music/naming';
+import { DEFAULT_TARGET, sanitizeTarget, type Target } from './music/target';
 import { sameKey } from './music/theory';
 import type { ZoneThresholds } from './zones';
 
@@ -25,6 +26,10 @@ export interface Settings {
   drone: { volume: number; octave: number };
   /** Do not show the drone leaking from the speakers into the mic as a sung note. */
   droneFilter: boolean;
+  /** While a target is on, the drone plays the target note instead of the tonic. */
+  droneTarget: boolean;
+  /** Target note: a degree of the current key in an octave (see music/target.ts). */
+  target: Target;
   /** Audio input `deviceId`; `''` is the system default. */
   micDeviceId: string;
 }
@@ -40,6 +45,8 @@ export const DEFAULT_SETTINGS: Settings = {
   zones: { green: 10, yellow: 25 },
   drone: { volume: 0.3, octave: 3 },
   droneFilter: true,
+  droneTarget: false,
+  target: DEFAULT_TARGET,
   micDeviceId: '',
 };
 
@@ -80,6 +87,8 @@ export function sanitizeSettings(raw: unknown): Settings {
         : d.drone.octave,
     },
     droneFilter: typeof r.droneFilter === 'boolean' ? r.droneFilter : d.droneFilter,
+    droneTarget: typeof r.droneTarget === 'boolean' ? r.droneTarget : d.droneTarget,
+    target: sanitizeTarget(r.target, key),
     micDeviceId:
       typeof r.micDeviceId === 'string' && r.micDeviceId.length <= MAX_DEVICE_ID_LENGTH
         ? r.micDeviceId

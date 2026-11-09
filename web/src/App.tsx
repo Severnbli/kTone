@@ -13,7 +13,8 @@ import { CentsGauge } from './components/CentsGauge';
 import { ClefGlyph, ClefPicker } from './components/ClefPicker';
 import { CLEF_LABEL_KEY } from './components/clefLabels';
 import { DroneControls } from './components/DroneControls';
-import { ChevronDownIcon, GearIcon, MicIcon, StopIcon, TargetIcon } from './components/icons';
+import { SOURCE_URL } from './buildInfo';
+import { ChevronDownIcon, GearIcon, GitHubIcon, MicIcon, StopIcon } from './components/icons';
 import { KeyPicker } from './components/KeyPicker';
 import { DebugOverlay } from './components/DebugOverlay';
 import { LevelMeter } from './components/LevelMeter';
@@ -22,12 +23,13 @@ import { PitchCurve } from './components/PitchCurve';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Sheet } from './components/Sheet';
 import { Staff } from './components/Staff';
-import { FEATURES } from './features';
+import { TargetControls } from './components/TargetControls';
 import { I18nProvider } from './i18n/I18nProvider';
 import { useI18n } from './i18n/context';
 import type { Strings } from './i18n/strings';
-import { keyLabel } from './music/naming';
-import { keySignature } from './music/theory';
+import { compactNote, keyLabel } from './music/naming';
+import { fitTarget, targetNote } from './music/target';
+import { keySignature, spelledToMidi } from './music/theory';
 import { loadSettings, saveSettings, type Settings, type Theme } from './settings';
 
 type Status =
@@ -215,6 +217,14 @@ function Main({
   const running = status === 'running';
   const active = running || status === 'suspended';
 
+  // The target note, or null for the nearest semitone (see music/target.ts).
+  const { target } = settings;
+  const tNote = useMemo(
+    () => (target.enabled ? targetNote(key, target.degree, target.octave) : null),
+    [key, target.enabled, target.degree, target.octave],
+  );
+  const tMidi = tNote ? spelledToMidi(tNote) : null;
+
   const keyName = keyLabel(key, lang);
   const clefName = t[CLEF_LABEL_KEY[clef]];
 
@@ -259,6 +269,17 @@ function Main({
             <span className="chip-text chip-clef-name">{clefName}</span>
           </button>
         </div>
+        <a
+          className="icon-btn icon-btn-quiet header-source"
+          href={SOURCE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${t.sourceLink} ${t.opensNewTab}`}
+          title={t.sourceLink}
+          data-testid="header-source-link"
+        >
+          <GitHubIcon size={20} />
+        </a>
         <button
           type="button"
           className="icon-btn"
@@ -279,19 +300,27 @@ function Main({
               naming={settings.naming}
               degreeStyle={settings.degreeStyle}
               hint={status === 'suspended' ? t.micPaused : running ? t.silence : t.idle}
+              target={tNote}
             />
           </div>
           <div className="panel staff-panel">
-            <Staff store={store} clef={clef} signature={signature} />
+            <Staff store={store} clef={clef} signature={signature} target={tNote} />
           </div>
         </div>
 
         <div className="panel gauge-panel">
-          <CentsGauge store={store} zones={settings.zones} />
+          <CentsGauge store={store} zones={settings.zones} targetMidi={tMidi} />
         </div>
 
         <div className="panel curve-panel">
-          <PitchCurve store={store} keySpec={key} naming={settings.naming} zones={settings.zones} />
+          <PitchCurve
+            store={store}
+            keySpec={key}
+            naming={settings.naming}
+            zones={settings.zones}
+            targetMidi={tMidi}
+            targetLabel={tNote ? compactNote(tNote, settings.naming, lang) : ''}
+          />
         </div>
 
         <LevelMeter levels={levels} hintHost={toastHost} />
@@ -321,6 +350,7 @@ function Main({
             settings={settings}
             naming={settings.naming}
             onChange={(drone) => setSettings({ ...settings, drone })}
+            onDroneTargetChange={(droneTarget) => setSettings({ ...settings, droneTarget })}
             onPlayingChange={onDronePlaying}
             store={store}
             visibility={visibility}
@@ -338,20 +368,15 @@ function Main({
               {status === 'starting' ? t.starting : active ? t.stop : t.start}
             </span>
           </button>
-          {/* Slot for the target note (degree + octave picker); see FEATURES.target. */}
-          <button
-            type="button"
-            className="dock-btn target-slot"
-            data-testid="target-slot"
-            disabled={!FEATURES.target}
-            title={t.targetSoon}
-            aria-label={t.targetSoon}
-          >
-            <TargetIcon />
-            <span className="dock-btn-text">
-              <span className="dock-btn-title">{t.target}</span>
-            </span>
-          </button>
+          <TargetControls
+            target={target}
+            keySpec={key}
+            clef={clef}
+            naming={settings.naming}
+            degreeStyle={settings.degreeStyle}
+            onChange={(next) => setSettings({ ...settings, target: next })}
+            store={store}
+          />
         </div>
       </footer>
 
@@ -369,7 +394,8 @@ function Main({
           value={key}
           naming={settings.naming}
           onChange={(k) => {
-            setSettings({ ...settings, key: k });
+            // Keep the degree: «III» stays the third of the new key.
+            setSettings({ ...settings, key: k, target: fitTarget(settings.target, k) });
             closeSheet();
           }}
         />

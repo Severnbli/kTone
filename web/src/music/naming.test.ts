@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compactNote,
   octaveShort,
   accidentalGlyph,
   formatDegree,
@@ -128,5 +129,27 @@ describe('key list labels', () => {
   it('English labels', () => {
     expect(keyLabel({ tonic: 'D', accidental: -1, mode: 'major' }, 'en')).toBe('D♭ major');
     expect(keyLabel({ tonic: 'G', accidental: 1, mode: 'minor' }, 'en')).toBe('G♯ minor');
+  });
+});
+
+describe('compactNote', () => {
+  const n = (letter: 'C' | 'E' | 'F', accidental: number, octave: number) => ({
+    letter,
+    accidental,
+    octave,
+  });
+
+  it('Russian solfège: octave marks', () => {
+    expect(compactNote(n('E', 0, 4), 'solfege', 'ru')).toBe('ми¹');
+    expect(compactNote(n('E', 0, 5), 'solfege', 'ru')).toBe('ми²');
+    expect(compactNote(n('E', 0, 3), 'solfege', 'ru')).toBe('ми');
+    expect(compactNote(n('F', 1, 2), 'solfege', 'ru')).toBe('Фа♯');
+    expect(compactNote(n('E', 0, 1), 'solfege', 'ru')).toBe('Ми₁');
+  });
+
+  it('letters and English solfège: scientific octave', () => {
+    expect(compactNote(n('E', 0, 4), 'letter', 'ru')).toBe('E4');
+    expect(compactNote(n('C', -1, 4), 'letter', 'en')).toBe('C♭4');
+    expect(compactNote(n('E', 0, 4), 'solfege', 'en')).toBe('mi4');
   });
 });

@@ -139,6 +139,37 @@ describe('settings persistence', () => {
     expect(sanitizeSettings({ clef: 'bass' }).micDeviceId).toBe('');
   });
 
+  it('keeps the target off by default and validates a saved one against the key', () => {
+    expect(DEFAULT_SETTINGS.target).toEqual({ enabled: false, degree: 1, octave: 4 });
+    expect(DEFAULT_SETTINGS.droneTarget).toBe(false);
+    // Settings saved before the target existed.
+    expect(sanitizeSettings({ clef: 'bass' }).target).toEqual(DEFAULT_SETTINGS.target);
+    expect(sanitizeSettings({ target: { enabled: true, degree: 6, octave: 4 } }).target).toEqual({
+      enabled: true,
+      degree: 6,
+      octave: 4,
+    });
+    expect(sanitizeSettings({ target: { enabled: 1, degree: 8, octave: 'x' } }).target).toEqual(
+      DEFAULT_SETTINGS.target,
+    );
+    // D6 is above the voice range (C6): the octave is pulled back to D5.
+    const d = sanitizeSettings({
+      key: { tonic: 'D', accidental: 0, mode: 'major' },
+      target: { enabled: true, degree: 1, octave: 6 },
+    });
+    expect(d.target).toEqual({ enabled: true, degree: 1, octave: 5 });
+    expect(sanitizeSettings({ droneTarget: true }).droneTarget).toBe(true);
+    expect(sanitizeSettings({ droneTarget: 'on' }).droneTarget).toBe(false);
+    const s = new MemoryStorage();
+    const custom: Settings = {
+      ...DEFAULT_SETTINGS,
+      droneTarget: true,
+      target: { enabled: true, degree: 3, octave: 5 },
+    };
+    saveSettings(custom, s);
+    expect(loadSettings(s)).toEqual(custom);
+  });
+
   it('uses window.localStorage by default', () => {
     saveSettings({ ...DEFAULT_SETTINGS, a4Hz: 432 });
     expect(loadSettings().a4Hz).toBe(432);

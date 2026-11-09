@@ -189,6 +189,53 @@ describe('DroneControls', () => {
     });
   });
 
+  it('plays the target instead of the tonic when asked to and a target is on', () => {
+    const onPlayingChange = vi.fn();
+    const onDroneTargetChange = vi.fn();
+    const target = { enabled: true, degree: 6, octave: 4 };
+    const { rerender } = render(
+      <DroneControls
+        settings={{ ...DEFAULT_SETTINGS, target }}
+        naming="solfege"
+        onChange={vi.fn()}
+        onDroneTargetChange={onDroneTargetChange}
+        onPlayingChange={onPlayingChange}
+      />,
+    );
+    fireEvent.click(openSheet());
+    expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(130.81, 2)); // C3
+    const toggle = screen.getByRole('switch', { name: 'Бурдон играет цель' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(onDroneTargetChange).toHaveBeenLastCalledWith(true);
+    rerender(
+      <DroneControls
+        settings={{ ...DEFAULT_SETTINGS, target, droneTarget: true }}
+        naming="solfege"
+        onChange={vi.fn()}
+        onDroneTargetChange={onDroneTargetChange}
+        onPlayingChange={onPlayingChange}
+      />,
+    );
+    // The analyzer is told the target's frequency (A4), so the drone filter follows it.
+    expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(440, 6));
+    expect(screen.getByTestId('drone-open')).toHaveAccessibleName(
+      'Бурдон · ля первой октавы, звучит',
+    );
+    expect(screen.getByText(/бурдон звучит на целевой ноте/)).toBeInTheDocument();
+    // Target off: back to the tonic.
+    rerender(
+      <DroneControls
+        settings={{ ...DEFAULT_SETTINGS, target: { ...target, enabled: false }, droneTarget: true }}
+        naming="solfege"
+        onChange={vi.fn()}
+        onDroneTargetChange={onDroneTargetChange}
+        onPlayingChange={onPlayingChange}
+      />,
+    );
+    expect(onPlayingChange).toHaveBeenLastCalledWith(expect.closeTo(130.81, 2));
+  });
+
   it('droneMidi computes the tonic pitch', () => {
     expect(droneMidi(2, 0, 3)).toBe(50); // D3
     expect(droneMidi(0, -1, 4)).toBe(59); // C♭4 = B3

@@ -102,4 +102,83 @@ describe('Staff', () => {
     expect(count('note-head')).toBe(1);
     expect(count('ledger-line')).toBe(1);
   });
+
+  describe('target ghost note', () => {
+    const headY = (id: string) => Number(screen.getByTestId(id).getAttribute('cy'));
+    const headX = (id: string) => Number(screen.getByTestId(id).getAttribute('cx'));
+
+    it('draws the target next to the sung note, at its own staff position', () => {
+      const a4 = { letter: 'A', accidental: 0, octave: 4 } as const;
+      render(
+        <StaffView
+          clef="treble"
+          signature={0}
+          note={a4}
+          staffStep={staffStepFor(a4, 'treble')}
+          target={{ letter: 'E', accidental: 0, octave: 4 }}
+        />,
+      );
+      expect(count('target-head')).toBe(1);
+      expect(count('note-head')).toBe(1);
+      expect(headX('target-head')).toBeGreaterThan(headX('note-head') + 30);
+      // E4 is the bottom line, A4 the second space: 3 steps of 5 px apart.
+      expect(headY('target-head') - headY('note-head')).toBe(15);
+      expect(screen.getByTestId('staff-target')).toHaveClass('staff-target');
+    });
+
+    it('shows the ghost alone before anything is sung, with ledger lines', () => {
+      render(
+        <StaffView
+          clef="treble"
+          signature={0}
+          note={null}
+          staffStep={0}
+          target={{ letter: 'C', accidental: 0, octave: 4 }}
+        />,
+      );
+      expect(count('note-head')).toBe(0);
+      expect(count('target-head')).toBe(1);
+      expect(count('target-ledger-line')).toBe(1);
+    });
+
+    it('prints the accidental the key signature does not cover', () => {
+      render(
+        <StaffView
+          clef="bass"
+          signature={0}
+          note={null}
+          staffStep={0}
+          target={{ letter: 'F', accidental: 1, octave: 3 }}
+        />,
+      );
+      expect(screen.getByTestId('target-accidental')).toHaveTextContent('♯');
+    });
+
+    it('a diatonic target needs no accidental in its key (D♭ major, V = A♭)', () => {
+      render(
+        <StaffView
+          clef="treble"
+          signature={-5}
+          note={null}
+          staffStep={0}
+          target={{ letter: 'A', accidental: -1, octave: 4 }}
+        />,
+      );
+      expect(count('target-accidental')).toBe(0);
+    });
+
+    it('live staff passes the target through', () => {
+      const store = new PitchStore();
+      render(
+        <Staff
+          store={store}
+          clef="bass"
+          signature={0}
+          target={{ letter: 'G', accidental: 0, octave: 2 }}
+        />,
+      );
+      expect(count('target-head')).toBe(1);
+      expect(headY('target-head')).toBe(100); // bottom line
+    });
+  });
 });

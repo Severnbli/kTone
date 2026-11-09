@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { browserMediaDevices, type MediaDevicesLike } from '../audio/devices';
 import type { ClefId } from '../engine/types';
 import { useI18n } from '../i18n/context';
 import type { Strings } from '../i18n/strings';
@@ -6,6 +7,7 @@ import { MAJOR_KEYS, MINOR_KEYS } from '../music/keys';
 import { keyLabel } from '../music/naming';
 import { keyId, parseKeyId } from '../music/theory';
 import { A4_MAX, A4_MIN, CLEFS, sanitizeSettings, type Settings } from '../settings';
+import { MicDeviceSelect } from './MicDeviceSelect';
 
 const CLEF_LABEL_KEY: Record<ClefId, keyof Strings> = {
   treble: 'clefTreble',
@@ -18,6 +20,8 @@ const CLEF_LABEL_KEY: Record<ClefId, keyof Strings> = {
 interface Props {
   settings: Settings;
   onChange: (next: Settings) => void;
+  /** For the microphone picker; defaults to `navigator.mediaDevices`, `null` hides it. */
+  mediaDevices?: MediaDevicesLike | null;
 }
 
 /** Number input that only commits valid values, so typing "4" on the way to "442" is fine. */
@@ -60,13 +64,19 @@ function NumberField({
   );
 }
 
-export function SettingsPanel({ settings, onChange }: Props) {
+export function SettingsPanel({ settings, onChange, mediaDevices = browserMediaDevices() }: Props) {
   const { t, lang } = useI18n();
   const update = (patch: Partial<Settings>) =>
     onChange(sanitizeSettings({ ...settings, ...patch }));
 
   return (
     <form className="settings" onSubmit={(e) => e.preventDefault()} data-testid="settings-panel">
+      <MicDeviceSelect
+        value={settings.micDeviceId}
+        onChange={(micDeviceId) => update({ micDeviceId })}
+        mediaDevices={mediaDevices}
+      />
+
       <label className="field">
         <span>{t.key}</span>
         <select

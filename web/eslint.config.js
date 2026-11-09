@@ -28,7 +28,7 @@ export default tseslint.config(
     rules: { 'react-refresh/only-export-components': 'off' },
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.mjs', '*.config.ts', 'e2e/**/*.ts'],
+    files: ['eslint.config.js', 'scripts/**/*.mjs', '*.config.ts', 'e2e/**/*.ts', 'sw/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
   {
@@ -46,7 +46,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['public/sw.js'],
+    files: ['sw/sw.js'],
     extends: [js.configs.recommended],
     languageOptions: { sourceType: 'script', globals: globals.serviceworker },
   },

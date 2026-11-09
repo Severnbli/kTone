@@ -57,6 +57,20 @@ export const ru = {
   flat: 'ниже',
   sharp: 'выше',
   inTune: 'точно',
+  micEnded: 'Микрофон отключился. Проверьте подключение и нажмите «Начать».',
+  micBackground: 'Запись остановлена, пока приложение было в фоне.',
+  micPaused: 'Пауза: система прервала звук (звонок или другое приложение).',
+  resume: 'Продолжить',
+  droneInterrupted: 'Бурдон остановлен: система прервала звук. Включите его снова.',
+  inputLevel: 'Уровень микрофона',
+  levelGate: 'Порог распознавания',
+  tooQuiet: 'Слишком тихо – подойдите ближе к микрофону или пойте громче',
+  tooLoud: 'Слишком громко – звук искажается, отодвиньтесь от микрофона',
+  micDevice: 'Микрофон',
+  micDefault: 'Системный по умолчанию',
+  micNumbered: 'Микрофон {n}',
+  micDevicesLocked: 'Названия микрофонов появятся после разрешения доступа.',
+  micDeviceMissing: 'Выбранный микрофон не найден – используется системный.',
 } as const;
 
 export type Strings = { [K in keyof typeof ru]: string };
@@ -115,6 +129,20 @@ export const en: Strings = {
   flat: 'flat',
   sharp: 'sharp',
   inTune: 'in tune',
+  micEnded: 'The microphone was disconnected. Check it and press Start.',
+  micBackground: 'Listening stopped while the app was in the background.',
+  micPaused: 'Paused: the system interrupted audio (a call or another app).',
+  resume: 'Resume',
+  droneInterrupted: 'Drone stopped: the system interrupted audio. Turn it on again.',
+  inputLevel: 'Microphone level',
+  levelGate: 'Detection threshold',
+  tooQuiet: 'Too quiet – move closer to the microphone or sing louder',
+  tooLoud: 'Too loud – the sound is distorting, move away from the microphone',
+  micDevice: 'Microphone',
+  micDefault: 'System default',
+  micNumbered: 'Microphone {n}',
+  micDevicesLocked: 'Microphone names appear after you allow access.',
+  micDeviceMissing: 'The selected microphone is not connected – using the system default.',
 };
 
 export const STRINGS: Record<Lang, Strings> = { ru, en };

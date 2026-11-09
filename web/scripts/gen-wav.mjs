@@ -21,6 +21,10 @@ const C3 = 440 * 2 ** (-21 / 12);
 const FIXTURES = {
   'a440.wav': [440, sine(0.5)], // A4
   'a466.wav': [440 * 2 ** (1 / 12), sine(0.5)], // A♯4 / B♭4
+  // A4 at −55 dBFS RMS: above the noise floor, below the analyzer gate (−46).
+  'a440-quiet.wav': [440, sine(Math.SQRT2 * 10 ** (-55 / 20))],
+  // A4 at full scale: clips.
+  'a440-loud.wav': [440, sine(1)],
   // The default drone (C major, octave 3, A4 = 440) leaking into the mic.
   'drone-c3.wav': [C3, leakedDrone, 2, 0.0003],
 };

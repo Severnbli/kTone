@@ -21,6 +21,8 @@ export interface Settings {
   drone: { volume: number; octave: number };
   /** Do not show the drone leaking from the speakers into the mic as a sung note. */
   droneFilter: boolean;
+  /** Audio input `deviceId`; `''` is the system default. */
+  micDeviceId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,7 +35,11 @@ export const DEFAULT_SETTINGS: Settings = {
   zones: { green: 10, yellow: 25 },
   drone: { volume: 0.3, octave: 3 },
   droneFilter: true,
+  micDeviceId: '',
 };
+
+/** Device ids are opaque strings (Chrome: 64 hex chars); anything longer is junk. */
+export const MAX_DEVICE_ID_LENGTH = 256;
 
 export const STORAGE_KEY = 'ktone.settings.v1';
 
@@ -68,6 +74,10 @@ export function sanitizeSettings(raw: unknown): Settings {
         : d.drone.octave,
     },
     droneFilter: typeof r.droneFilter === 'boolean' ? r.droneFilter : d.droneFilter,
+    micDeviceId:
+      typeof r.micDeviceId === 'string' && r.micDeviceId.length <= MAX_DEVICE_ID_LENGTH
+        ? r.micDeviceId
+        : d.micDeviceId,
   };
 }
 

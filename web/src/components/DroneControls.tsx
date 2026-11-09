@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Drone, droneMidi } from '../audio/drone';
+import { documentVisibility, watchVisibility, type PageVisibility } from '../audio/lifecycle';
 import type { PitchStore } from '../audio/pitchStore';
 import { useI18n } from '../i18n/context';
 import { formatNote, type NoteNaming } from '../music/naming';
@@ -11,16 +12,38 @@ interface Props {
   settings: Settings;
   naming: NoteNaming;
   onChange: (drone: Settings['drone']) => void;
-  /** Called with the drone frequency while it plays, null when it stops. */
+  /**
+   * Called with the drone frequency when it starts playing and whenever that
+   * changes, and with null when it stops (on a tap, an interruption or in the
+   * background). Fires as soon as the drone is switched on, before its audio
+   * starts, so the analyzer knows the drone before the mic can hear it.
+   */
   onPlayingChange?: (hz: number | null) => void;
   /** Source of the drone leak hint. */
   store?: PitchStore;
+  visibility?: PageVisibility;
+  createDrone?: () => Drone;
 }
 
-export function DroneControls({ settings, naming, onChange, onPlayingChange, store }: Props) {
+const defaultVisibility = documentVisibility();
+
+// Lifecycle: when the system pauses the drone's AudioContext, try one resume
+// while the page is visible (now or on return); if that fails, or the page
+// stays hidden for BACKGROUND_STOP_MS, stop the drone and say why. Tapping the
+// button again restarts it from a user gesture.
+export function DroneControls({
+  settings,
+  naming,
+  onChange,
+  onPlayingChange,
+  store,
+  visibility = defaultVisibility,
+  createDrone = () => new Drone(),
+}: Props) {
   const { t, lang } = useI18n();
   const droneRef = useRef<Drone | null>(null);
   const [on, setOn] = useState(false);
+  const [interrupted, setInterrupted] = useState(false);
   const { key, a4Hz } = settings;
   const { volume, octave } = settings.drone;
   const midi = droneMidi(LETTER_PC[key.tonic], key.accidental, octave);
@@ -33,9 +56,6 @@ export function DroneControls({ settings, naming, onChange, onPlayingChange, sto
   useEffect(() => {
     if (on) droneRef.current?.setVolume(volume);
   }, [on, volume]);
-  useEffect(() => {
-    onPlayingChange?.(on ? hz : null);
-  }, [on, hz, onPlayingChange]);
   useEffect(
     () => () => {
       void droneRef.current?.dispose();
@@ -43,14 +63,49 @@ export function DroneControls({ settings, naming, onChange, onPlayingChange, sto
     [],
   );
 
+  const onPlayingChangeRef = useRef(onPlayingChange);
+  onPlayingChangeRef.current = onPlayingChange;
+  useEffect(() => {
+    onPlayingChangeRef.current?.(on ? hz : null);
+  }, [on, hz]);
+
+  const halt = useCallback((reason: 'interrupted' | null) => {
+    droneRef.current?.stop();
+    setOn(false);
+    setInterrupted(reason === 'interrupted');
+  }, []);
+
+  const recover = useCallback(async () => {
+    const drone = droneRef.current;
+    if (!drone?.paused || visibility.hidden) return;
+    if (!(await drone.resume()) && droneRef.current === drone && drone.playing) {
+      halt('interrupted');
+    }
+  }, [visibility, halt]);
+
+  useEffect(() => {
+    const drone = droneRef.current;
+    if (!on || !drone) return;
+    drone.onPause = () => void recover();
+    const unwatch = watchVisibility(visibility, {
+      onHiddenTimeout: () => halt(null),
+      onVisible: () => void recover(),
+    });
+    return () => {
+      drone.onPause = null;
+      unwatch();
+    };
+  }, [on, visibility, recover, halt]);
+
   const toggle = () => {
-    droneRef.current ??= new Drone();
+    droneRef.current ??= createDrone();
+    const drone = droneRef.current;
     if (on) {
-      droneRef.current.stop();
-      setOn(false);
+      halt(null);
     } else {
-      void droneRef.current.start(hz, volume);
+      setInterrupted(false);
       setOn(true);
+      void drone.start(hz, volume).then(() => recover());
     }
   };
 
@@ -99,6 +154,11 @@ export function DroneControls({ settings, naming, onChange, onPlayingChange, sto
           </select>
         </label>
       </div>
+      {interrupted && (
+        <p className="error" role="status" data-testid="drone-interrupted">
+          {t.droneInterrupted}
+        </p>
+      )}
       <p className={on ? 'warning active' : 'warning'}>{t.droneWarning}</p>
       {on && store && <DroneLeakHint store={store} />}
     </section>

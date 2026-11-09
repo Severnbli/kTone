@@ -45,6 +45,8 @@
   --curve-tonic: rgba(192, 132, 252, 0.6);
   --curve-tonic-text: #d8b4fe;
   --curve-band: rgba(62, 230, 160, 0.12);
+  --curve-target: #c9a8ff;
+  --curve-target-band: rgba(183, 148, 255, 0.16);
 
   /* Shape and space */
   --radius-s: 10px;
@@ -93,6 +95,8 @@
     --curve-tonic: rgba(109, 40, 217, 0.55);
     --curve-tonic-text: #6d28d9;
     --curve-band: rgba(10, 127, 86, 0.12);
+    --curve-target: #6d28d9;
+    --curve-target-band: rgba(109, 40, 217, 0.1);
     --shadow-1: 0 1px 2px rgba(23, 18, 43, 0.08);
     --shadow-2: 0 12px 40px rgba(23, 18, 43, 0.18);
     color-scheme: light;
@@ -124,6 +128,8 @@
   --curve-tonic: rgba(109, 40, 217, 0.55);
   --curve-tonic-text: #6d28d9;
   --curve-band: rgba(10, 127, 86, 0.12);
+  --curve-target: #6d28d9;
+  --curve-target-band: rgba(109, 40, 217, 0.1);
   --shadow-1: 0 1px 2px rgba(23, 18, 43, 0.08);
   --shadow-2: 0 12px 40px rgba(23, 18, 43, 0.18);
   color-scheme: light;
@@ -490,6 +496,21 @@ select {
   opacity: 0.35;
 }
 
+/* Target note: a ghost head in the brand accent, outlined and see-through. */
+.staff .staff-target {
+  color: var(--accent);
+}
+
+.staff .target-head {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.staff .staff-target .ledger-line {
+  opacity: 0.8;
+}
+
 /* ---------- Cents gauge ---------- */
 
 .gauge {
@@ -566,6 +587,49 @@ select {
   font-weight: 800;
   font-size: 1.15rem;
   margin-right: 2px;
+}
+
+/*
+ * Target mode, away from the target: a direction message replaces the side
+ * labels and the readout (same grid cell, so the height never changes), the
+ * needle is pinned to the edge, the arrow points where to go.
+ */
+.gauge-message {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: none;
+  justify-self: center;
+  max-width: 100%;
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.2;
+  color: var(--zone-red);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gauge[data-target='far'] .gauge-message,
+.gauge[data-target='octave'] .gauge-message {
+  display: block;
+}
+
+.gauge[data-target='far'] :is(.gauge-side, .gauge-readout),
+.gauge[data-target='octave'] :is(.gauge-side, .gauge-readout) {
+  visibility: hidden;
+}
+
+.gauge[data-dir='flat'] .gauge-message::before {
+  content: '▲ ';
+}
+
+.gauge[data-dir='sharp'] .gauge-message::before {
+  content: '▼ ';
+}
+
+.gauge[data-target='octave'] .gauge-message {
+  color: var(--zone-yellow);
 }
 
 .gauge-unit {

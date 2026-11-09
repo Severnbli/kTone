@@ -19,6 +19,7 @@ import {
   targetMessage,
   targetMidi,
   targetNote,
+  viewCenter,
 } from './target';
 import { keyId, mod, tonicPc } from './theory';
 
@@ -195,6 +196,16 @@ describe('assessTarget', () => {
     expect(assessTarget(45.2, 69, zones)).toMatchObject({ state: 'octave', octaves: -2 });
     // An octave and a semitone off is just far.
     expect(assessTarget(70, 57, zones)).toMatchObject({ state: 'far', octaves: 0 });
+  });
+});
+
+describe('viewCenter', () => {
+  it('follows the sung note, or stays on the target while the note is in reach', () => {
+    expect(viewCenter(60, null, 5.5)).toBe(60);
+    expect(viewCenter(NaN, 62, 5.5)).toBe(62);
+    expect(viewCenter(60, 62, 5.5)).toBe(62);
+    expect(viewCenter(60, 72, 5.5)).toBe(65.5);
+    expect(viewCenter(72, 60, 5.5)).toBe(66.5);
   });
 });
 

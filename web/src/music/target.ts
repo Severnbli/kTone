@@ -137,6 +137,17 @@ export function assessTarget(
   };
 }
 
+/**
+ * Where a pitch view (the curve) should be centered. Without a target it
+ * follows the sung note; with one it stays on the target, moving only as far
+ * as needed to keep the sung note within `reach` semitones of the center.
+ */
+export function viewCenter(sung: number, target: number | null, reach: number): number {
+  if (target === null) return sung;
+  if (!Number.isFinite(sung)) return target;
+  return Math.min(sung + reach, Math.max(sung - reach, target));
+}
+
 /** Plural form index: 0 «полутон», 1 «полутона», 2 «полутонов»; English 0 one, 2 other. */
 export function pluralIndex(n: number, lang: Lang): 0 | 1 | 2 {
   const a = Math.abs(n);

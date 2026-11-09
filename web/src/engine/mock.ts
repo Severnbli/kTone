@@ -2,7 +2,8 @@
 // fallback. Pitch detection is a plain YIN (cumulative mean normalized
 // difference); spelling is simple and key-aware: diatonic notes use the key's
 // spelling, chromatic notes use sharps in sharp keys (and C/a) and flats in flat
-// keys. The drone filter is a port of the Rust one (see `droneCheck.ts`).
+// keys. The drone filter is a port of the Rust one (see `droneCheck.ts`), and
+// so is the automatic noise gate (see `noiseFloor.ts`).
 
 import type {
   Analyzer,
@@ -15,6 +16,7 @@ import type {
 } from './types';
 import { ALL_KEYS, DEFAULT_KEY } from '../music/keys';
 import { DroneChecker } from './droneCheck';
+import { NoiseFloor } from './noiseFloor';
 import { LETTER_PC, hzToMidi, keySignature, mod, scaleOf, staffStepFor } from '../music/theory';
 
 export const FRAME_SIZE = 2048;
@@ -23,7 +25,6 @@ export const HOP_SIZE = 512;
 const MIN_HZ = 60;
 const MAX_HZ = 1500;
 const YIN_THRESHOLD = 0.15;
-const SILENCE_RMS = 0.01;
 /** Extra cents past the half-semitone boundary before the stable note changes. */
 const HYSTERESIS_CENTS = 15;
 /** Vibrato-center window, as in the Rust core (`CENTER_WINDOW_SECS`). */
@@ -164,10 +165,12 @@ class MockAnalyzer implements Analyzer {
   private droneHz = 0;
   private droneFilter = false;
   private readonly droneChecker: DroneChecker;
+  private readonly noise: NoiseFloor;
   droneLeak = false;
 
   constructor(private readonly sampleRate: number) {
     this.droneChecker = new DroneChecker(sampleRate, FRAME_SIZE);
+    this.noise = new NoiseFloor(sampleRate, HOP_SIZE);
     const frames = Math.round((CENTER_WINDOW_SECS * sampleRate) / HOP_SIZE);
     this.centerHist = new Float64Array(Math.max(1, Math.min(255, frames || 1)));
   }
@@ -178,6 +181,14 @@ class MockAnalyzer implements Analyzer {
       this.clearCenter();
     }
     this.settings = { ...settings, key: { ...settings.key } };
+  }
+
+  get noiseFloor(): number | null {
+    return this.noise.floor;
+  }
+
+  get gate(): number {
+    return this.noise.gate;
   }
 
   setDrone(hz: number | null, filter: boolean): void {
@@ -242,9 +253,12 @@ class MockAnalyzer implements Analyzer {
     let energy = 0;
     for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
     const rms = Math.sqrt(energy / frame.length);
-    if (rms < SILENCE_RMS || hasSilentEdge(frame)) return this.unpitched();
+    if (hasSilentEdge(frame)) return this.unpitched();
+    const loudEnough = rms >= this.noise.gate;
+    // The detector runs below the gate too, so a quiet clear pitch is not learned as noise.
     const pitch = detectPitch(frame, this.sampleRate, this.diff);
-    if (!pitch) return this.unpitched();
+    this.noise.push(rms, pitch !== null);
+    if (!loudEnough || !pitch) return this.unpitched();
     let [frequencyHz] = pitch;
     const clarity = pitch[1];
     if (this.droneHz > 0) {
@@ -304,6 +318,7 @@ class MockAnalyzer implements Analyzer {
     this.stableMidi = null;
     this.droneLeak = false;
     this.clearCenter();
+    this.noise.reset();
   }
 }
 

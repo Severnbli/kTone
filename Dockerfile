@@ -33,6 +33,8 @@ COPY --chown=node:node web web
 # Public origin for canonical links, Open Graph, robots.txt and sitemap.xml
 # (default https://ktone.severnbli.dev, see web/seo/site.ts).
 ARG VITE_SITE_URL
+# Commit shown as the build in the settings "About" section ("dev" when unset).
+ARG VITE_GIT_SHA
 RUN ./scripts/build-wasm.sh && pnpm -C web build
 
 # --- runtime: static files served by nginx ----------------------------------

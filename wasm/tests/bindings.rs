@@ -25,7 +25,7 @@ fn run(analyzer: &mut Analyzer, freq: f32) -> Option<Vec<f64>> {
 #[test]
 fn reports_frame_layout_size() {
     assert_eq!(frame_fields(), FRAME_FIELDS);
-    assert_eq!(FRAME_FIELDS, 14);
+    assert_eq!(FRAME_FIELDS, 15);
 }
 
 #[test]
@@ -51,6 +51,7 @@ fn reports_vibrato_center() {
             raw.push(out[3]);
             let expected = (out[12] - out[2]) * 100.0;
             assert!((out[13] - expected).abs() < 0.01);
+            assert_eq!(out[14], 1.0, "center ready");
         }
     }
     assert!(centers.len() > 100);
@@ -72,6 +73,7 @@ fn detects_a4_in_c_major_treble() {
     assert!(out[3].abs() < 3.0, "cents {}", out[3]);
     assert!((out[12] - 69.0).abs() < 0.03, "center midi {}", out[12]);
     assert!(out[13].abs() < 3.0, "center cents {}", out[13]);
+    assert_eq!(out[14], 1.0); // a steady tone: center ready
     assert_eq!(&out[6..9], &[5.0, 0.0, 4.0]); // A natural, octave 4
     assert_eq!(out[9], 6.0); // degree 6 in C major
     assert_eq!(out[10], 1.0);

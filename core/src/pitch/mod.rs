@@ -10,7 +10,8 @@
 //! guards against octave errors, median-filters in the semitone domain and
 //! decides the displayed note (see "Note switching" below). It also reports
 //! the vibrato center: a triangular-weighted moving average of the accepted
-//! estimates over about 300 ms, which the UI uses to judge accuracy.
+//! estimates over about 300 ms, which the UI uses to judge accuracy, and
+//! whether that center is ready to be judged yet.
 //!
 //! Short window: while the pitch is high enough (at least
 //! [`SHORT_WINDOW_PERIODS`] periods in half a frame), only the newest half of
@@ -92,6 +93,17 @@ pub const CENTER_WINDOW_SECS: f32 = 0.3;
 const DEFAULT_CENTER_WINDOW: usize = 28;
 /// Upper bound for [`TrackerConfig::center_window`].
 const MAX_CENTER_WINDOW: usize = 255;
+/// The center is ready once the current note has filled this fraction
+/// (numerator, denominator) of the center window: about 180 ms, so even a
+/// ±40 cent vibrato at 4.5 Hz averages to within ±25 cents...
+const CENTER_READY_FRACTION: (usize, usize) = (3, 5);
+/// ... or earlier, after this many frames (about 64 ms at hop 512, 48 kHz),
+/// if they all lie within [`CENTER_READY_SPREAD`] semitones: a straight tone
+/// needs no averaging. The span is long enough that even near a crest a
+/// vibrato of ±25 cents at 4.5 Hz moves more than that.
+pub const CENTER_READY_MIN_FRAMES: usize = 6;
+/// See [`CENTER_READY_MIN_FRAMES`].
+pub const CENTER_READY_SPREAD: f64 = 0.08;
 /// Time the pitch must stay past the hysteresis band of a swinging or
 /// unsettled note before the neighbor is shown ([`TrackerConfig::switch_dwell`]).
 pub const SWITCH_DWELL_SECS: f32 = 0.06;
@@ -669,6 +681,12 @@ pub struct TrackedPitch {
     pub center_midi: f32,
     /// Deviation of `center_midi` from `stable_midi` in cents.
     pub center_cents: f32,
+    /// `false` right after an onset or a note change while the center window
+    /// holds too little of a swinging pitch to be judged (it would still
+    /// follow the vibrato); the UI should not color the zone then. A straight
+    /// tone is ready after 6 frames (about 64 ms), a vibrato after 3/5 of the
+    /// window (about 180 ms). Stays set until the note changes.
+    pub center_ready: bool,
     /// Clarity of the current frame.
     pub clarity: f32,
     /// RMS level of the current frame.
@@ -726,6 +744,8 @@ pub struct PitchTracker {
     /// The current note was entered by a leap (more than 1.5 semitones) or
     /// at an onset, see [`LEAP_TRANSIT_FRAMES`].
     transit: bool,
+    /// The center of the current note is ready, see [`Self::center_ready`].
+    ready: bool,
     /// Frequency of the drone the app plays, 0 when off.
     drone_hz: f64,
     drone_filter: bool,
@@ -766,6 +786,7 @@ impl PitchTracker {
             past_band_dir: 0,
             past_excess: 0.0,
             transit: false,
+            ready: false,
             drone_hz: 0.0,
             drone_filter: false,
             drone_leak: false,
@@ -848,6 +869,7 @@ impl PitchTracker {
         if self.stable != Some(stable) {
             // A new note: do not drag the center from the previous one.
             self.center_len = 0;
+            self.ready = false;
             self.center_pos = 0;
             self.past_band = 0;
         }
@@ -863,6 +885,7 @@ impl PitchTracker {
             cents: ((midi - stable as f64) * 100.0) as f32,
             center_midi: center_midi as f32,
             center_cents: ((center_midi - stable as f64) * 100.0) as f32,
+            center_ready: self.center_ready(),
             clarity: est.clarity,
             rms: rms as f32,
         })
@@ -989,6 +1012,26 @@ impl PitchTracker {
         false
     }
 
+    /// See [`TrackedPitch::center_ready`]. Once ready, a note stays ready
+    /// until it changes, so the zone does not blink on and off.
+    fn center_ready(&mut self) -> bool {
+        let len = self.center_len;
+        if !self.ready
+            && CENTER_READY_FRACTION.1 * len >= CENTER_READY_FRACTION.0 * self.center_hist.len()
+        {
+            self.ready = true;
+        }
+        if !self.ready && len >= CENTER_READY_MIN_FRAMES {
+            let (lo, hi) = self
+                .center_values()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                    (lo.min(v), hi.max(v))
+                });
+            self.ready = hi - lo <= CENTER_READY_SPREAD;
+        }
+        self.ready
+    }
+
     /// The center history of the current note, oldest first.
     fn center_values(&self) -> impl Iterator<Item = f64> + '_ {
         let len = self.center_len;
@@ -1061,6 +1104,7 @@ impl PitchTracker {
         self.pending_value = 0.0;
         self.stable = None;
         self.center_len = 0;
+        self.ready = false;
         self.center_pos = 0;
         self.past_band = 0;
     }

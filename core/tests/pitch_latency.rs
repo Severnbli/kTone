@@ -9,7 +9,8 @@
 //!
 //! - (a) `midi` is within 50 cents of the new note,
 //! - (b) `stable_midi` is the new note,
-//! - (c) `center_cents` is within ±10 cents of the new note.
+//! - (c) `center_cents` is within ±10 cents of the new note,
+//! - (d) `center_ready` is set on the new note (the UI colors the zone).
 //!
 //! Run with `--nocapture` to see the table. The asserted bounds are recorded
 //! in `docs/decisions.md`; buffering in the browser (input latency, message
@@ -36,6 +37,7 @@ struct Bounds {
     midi: f64,
     stable: f64,
     center: f64,
+    ready: f64,
 }
 
 fn bounds(c: &Case) -> Bounds {
@@ -54,6 +56,9 @@ fn bounds(c: &Case) -> Bounds {
         },
         // The center of a vibrato needs most of its 300 ms window.
         center: if c.vibrato { 300.0 } else { base },
+        // A straight tone is ready 6 frames into the note, a vibrato after
+        // 3/5 of the center window.
+        ready: if c.vibrato { 330.0 } else { base + 60.0 },
     }
 }
 
@@ -115,12 +120,13 @@ const CASES: [Case; 14] = [
     case("soprano step + vib", 74.0, 76.0, true),
 ];
 
-/// Delays (ms) of one run: (a) midi, (b) stable note, (c) center.
+/// Delays (ms) of one run: (a) midi, (b) stable note, (c) center, (d) ready.
 #[derive(Clone, Copy)]
 struct Delays {
     midi: f64,
     stable: f64,
     center: f64,
+    ready: f64,
 }
 
 /// Time (ms after the onset) of the first frame from which `ok` holds for
@@ -170,18 +176,19 @@ fn measure(c: Case, align: usize) -> Delays {
         center: settle(&frames, |p| {
             p.stable_midi == to as i32 && (p.center_midi as f64 - to).abs() * 100.0 <= 10.0
         }),
+        ready: settle(&frames, |p| p.stable_midi == to as i32 && p.center_ready),
     }
 }
 
 #[test]
 fn step_latency_table() {
     println!(
-        "\n{:<22} {:>13} {:>13} {:>13}",
-        "step (48 kHz)", "(a) midi", "(b) stable", "(c) center"
+        "\n{:<22} {:>13} {:>13} {:>13} {:>13}",
+        "step (48 kHz)", "(a) midi", "(b) stable", "(c) center", "(d) ready"
     );
     println!(
-        "{:<22} {:>13} {:>13} {:>13}",
-        "", "mean / max", "mean / max", "mean / max"
+        "{:<22} {:>13} {:>13} {:>13} {:>13}",
+        "", "mean / max", "mean / max", "mean / max", "mean / max"
     );
     let mut failures = Vec::new();
     for c in CASES {
@@ -191,16 +198,18 @@ fn step_latency_table() {
             let max = v.iter().cloned().fold(0.0, f64::max);
             (v.iter().sum::<f64>() / v.len() as f64, max)
         };
-        let (m, s, ce) = (stat(|d| d.midi), stat(|d| d.stable), stat(|d| d.center));
+        let (m, s) = (stat(|d| d.midi), stat(|d| d.stable));
+        let (ce, r) = (stat(|d| d.center), stat(|d| d.ready));
         println!(
-            "{:<22} {:>6.0} / {:>4.0} {:>6.0} / {:>4.0} {:>6.0} / {:>4.0}",
-            c.name, m.0, m.1, s.0, s.1, ce.0, ce.1
+            "{:<22} {:>6.0} / {:>4.0} {:>6.0} / {:>4.0} {:>6.0} / {:>4.0} {:>6.0} / {:>4.0}",
+            c.name, m.0, m.1, s.0, s.1, ce.0, ce.1, r.0, r.1
         );
         let b = bounds(&c);
         for (what, got, max) in [
             ("midi", m.1, b.midi),
             ("stable note", s.1, b.stable),
             ("center", ce.1, b.center),
+            ("center ready", r.1, b.ready),
         ] {
             if got > max {
                 failures.push(format!("{}: {what} after {got:.0} ms (> {max:.0})", c.name));

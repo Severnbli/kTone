@@ -9,7 +9,7 @@ use ktone_core::theory::{Clef, Key, Letter, Mode, SpelledNote};
 use wasm_bindgen::prelude::*;
 
 /// Number of `f64` slots written by [`Analyzer::process`].
-pub const FRAME_FIELDS: usize = 14;
+pub const FRAME_FIELDS: usize = 15;
 
 const LETTERS: [Letter; 7] = [
     Letter::C,
@@ -115,10 +115,12 @@ impl Analyzer {
     /// Processes one frame and writes [`FRAME_FIELDS`] values into `out`:
     /// `[frequencyHz, midi, stableMidi, cents, clarity, rms,
     ///   letter, accidental, octave, degree (0 = out of key), inKey (0/1), staffStep,
-    ///   centerMidi, centerCents]`.
+    ///   centerMidi, centerCents, centerReady (0/1)]`.
     /// `midi`/`cents` are per frame (they follow the vibrato); `centerMidi`/
     /// `centerCents` are the vibrato center (about 300 ms average of the current
     /// note), which accuracy is judged by. Both cents are relative to `stableMidi`.
+    /// `centerReady` is 0 while the center is too young to be judged (right
+    /// after an onset or a note change in a vibrato).
     /// Returns false (leaving `out` untouched) while silent or unpitched.
     pub fn process(&mut self, frame: &[f32], out: &mut [f64]) -> bool {
         if out.len() < FRAME_FIELDS {
@@ -141,6 +143,7 @@ impl Analyzer {
         out[11] = self.clef.staff_step(&note) as f64;
         out[12] = pitch.center_midi as f64;
         out[13] = pitch.center_cents as f64;
+        out[14] = if pitch.center_ready { 1.0 } else { 0.0 };
         true
     }
 

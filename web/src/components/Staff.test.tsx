@@ -47,6 +47,7 @@ describe('Staff', () => {
     expect(count('note-head')).toBe(1);
     expect(count('ledger-line')).toBe(1);
     expect(count('note-accidental')).toBe(0);
+    expect(screen.getByTestId('staff-note')).toHaveAttribute('data-step', '-2');
   });
 
   it('A5 above the treble staff needs one ledger line, C6 two', () => {

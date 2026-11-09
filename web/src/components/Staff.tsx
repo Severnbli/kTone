@@ -154,7 +154,11 @@ export function StaffView({
         </g>
       )}
       {note && (
-        <g className={active ? 'staff-note' : 'staff-note inactive'} data-testid="staff-note">
+        <g
+          className={active ? 'staff-note' : 'staff-note inactive'}
+          data-testid="staff-note"
+          data-step={step}
+        >
           {ledgerLines(step).map((s) => (
             <line
               key={s}

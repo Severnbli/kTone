@@ -48,6 +48,16 @@ docker run -d --name ktone --restart unless-stopped -p 8080:80 severnbli/ktone:l
 
 Either way the app is on http://localhost:8080. Browsers allow microphone access only on `localhost` or over HTTPS, so for any other host put it behind a reverse proxy with TLS (Caddy, Traefik, nginx) that forwards to port 8080.
 
+### Your own domain
+
+The canonical link, Open Graph and JSON-LD tags in the page, `robots.txt` and `sitemap.xml` point at the public origin, which is baked in at build time from `VITE_SITE_URL` (default `https://ktone.severnbli.dev`). The prebuilt images use the default, so if search engines or link previews should see your domain, build the image yourself:
+
+```sh
+docker build --target runtime --build-arg VITE_SITE_URL=https://tuner.example.org -t ktone .
+```
+
+Outside Docker, set `VITE_SITE_URL` in the environment or in `web/.env.production` before `pnpm -C web build`. It must be an absolute `http(s)` URL without a trailing slash; a path prefix is kept as is.
+
 ## Development
 
 Requires Docker with Compose.

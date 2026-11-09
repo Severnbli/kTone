@@ -13,8 +13,12 @@ const build = [
 ];
 
 describe('shouldPrecache', () => {
-  it('skips the worker itself, source maps and dotfiles', () => {
+  it('skips the worker itself, crawler files, source maps and dotfiles', () => {
     expect(shouldPrecache('sw.js')).toBe(false);
+    expect(shouldPrecache('robots.txt')).toBe(false);
+    expect(shouldPrecache('sitemap.xml')).toBe(false);
+    expect(shouldPrecache('og-image.png')).toBe(false);
+    expect(shouldPrecache('icons/og-image.png')).toBe(true);
     expect(shouldPrecache('assets/a.js.map')).toBe(false);
     expect(shouldPrecache('icons/.DS_Store')).toBe(false);
     expect(shouldPrecache('assets/a.wasm')).toBe(true);

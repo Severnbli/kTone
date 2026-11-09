@@ -30,6 +30,12 @@ const HYSTERESIS_CENTS = 15;
 const CENTER_WINDOW_SECS = 0.3;
 /** Unpitched frames in a row after which the center history is dropped. */
 const GAP_RESET_FRAMES = 4;
+/**
+ * The center is ready after 3/5 of its window, or after this many frames
+ * within `CENTER_READY_SPREAD` semitones (as in the Rust core).
+ */
+const CENTER_READY_MIN_FRAMES = 6;
+const CENTER_READY_SPREAD = 0.08;
 /** Samples at or below this magnitude are digital silence (as in the Rust core). */
 const DIGITAL_SILENCE = 1e-6;
 /**
@@ -153,6 +159,7 @@ class MockAnalyzer implements Analyzer {
   private readonly centerHist: Float64Array;
   private centerLen = 0;
   private centerPos = 0;
+  private centerReady = false;
   private invalidRun = 0;
   private droneHz = 0;
   private droneFilter = false;
@@ -181,12 +188,32 @@ class MockAnalyzer implements Analyzer {
   private clearCenter(): void {
     this.centerLen = 0;
     this.centerPos = 0;
+    this.centerReady = false;
   }
 
   private unpitched(): null {
     this.invalidRun++;
     if (this.invalidRun >= GAP_RESET_FRAMES) this.clearCenter();
     return null;
+  }
+
+  /** See `PitchFrame.centerReady`; latched until the note changes. */
+  private isCenterReady(): boolean {
+    const len = this.centerLen;
+    const cap = this.centerHist.length;
+    if (!this.centerReady && 5 * len >= 3 * cap) this.centerReady = true;
+    if (!this.centerReady && len >= CENTER_READY_MIN_FRAMES) {
+      const oldest = (this.centerPos - len + cap) % cap;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < len; i++) {
+        const v = this.centerHist[(oldest + i) % cap];
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+      this.centerReady = hi - lo <= CENTER_READY_SPREAD;
+    }
+    return this.centerReady;
   }
 
   /** Triangular-weighted mean of the center ring (same as the Rust core). */
@@ -257,6 +284,7 @@ class MockAnalyzer implements Analyzer {
       staffStep: staffStepFor(note, this.settings.clef),
       centerMidi,
       centerCents: (centerMidi - stableMidi) * 100,
+      centerReady: this.isCenterReady(),
     };
   }
 

@@ -23,6 +23,9 @@ describe('App', () => {
 
     act(() => mic.feed(440, 2048));
     expect(screen.getByTestId('note-name')).toHaveTextContent('ля');
+    // The zone shows once the center is ready: 6 frames of a straight tone.
+    expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'pending');
+    act(() => mic.feedSine(440, 5 * 512));
     expect(screen.getByTestId('cents-gauge')).toHaveAttribute('data-zone', 'green');
     expect(screen.getByTestId('level-meter')).toHaveAttribute('data-level', '-9');
 

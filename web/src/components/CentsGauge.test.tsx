@@ -63,6 +63,18 @@ describe('CentsGauge', () => {
     expect(gauge).toHaveAttribute('data-zone', 'yellow');
   });
 
+  it('shows no zone until the center is ready, but moves the needle', () => {
+    const { store, gauge } = setup();
+    const needle = screen.getByTestId('gauge-needle');
+    act(() => store.push(frame(69, 40, { centerReady: false }), 0));
+    expect(gauge).toHaveAttribute('data-zone', 'pending');
+    expect(gauge).toHaveAttribute('data-dir', 'none');
+    expect(needle.style.left).toBe('90%');
+    act(() => store.push(frame(69, 40), 10));
+    expect(gauge).toHaveAttribute('data-zone', 'red');
+    expect(gauge).toHaveAttribute('data-dir', 'sharp');
+  });
+
   it('returns to no zone on silence', () => {
     const { store, gauge } = setup();
     act(() => store.push(frame(69, 0), 0));

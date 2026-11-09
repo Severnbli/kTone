@@ -180,6 +180,14 @@ describe('CentsGauge', () => {
       expect(gauge).toHaveAttribute('data-zone', 'red');
       expect(message).toHaveTextContent('выше на 2 полутона');
     });
+
+    it('shows the octave hint at once but no hit mark before the center is ready', () => {
+      const { store, gauge, message } = setupTarget(57);
+      act(() => store.push(frame(69, 2, { centerReady: false }), 0));
+      expect(gauge).toHaveAttribute('data-target', 'octave');
+      expect(gauge).not.toHaveAttribute('data-zone', 'green');
+      expect(message).toHaveTextContent('нота верная, октава выше');
+    });
   });
 
   it('shows no zone until the center is ready, but moves the needle', () => {

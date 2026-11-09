@@ -12,11 +12,13 @@ test('the level meter follows the input and the mic can be switched', async ({ p
   await expect(page.getByTestId('note-name')).toHaveText('ля');
   // The fixture is a 0.5-amplitude sine: about −9 dBFS RMS.
   await expect(meter).toHaveAttribute('data-state', 'ok');
-  const level = Number(await meter.getAttribute('data-level'));
-  expect(level).toBeGreaterThan(-15);
-  expect(level).toBeLessThan(-3);
-  const width = await page.getByTestId('level-fill').evaluate((el) => parseFloat(el.style.width));
-  expect(width).toBeGreaterThan(70);
+  // Live values (written per frame): poll them, a single frame may lag under load.
+  const level = () => meter.getAttribute('data-level').then(Number);
+  await expect.poll(level).toBeGreaterThan(-15);
+  await expect.poll(level).toBeLessThan(-3);
+  const width = () =>
+    page.getByTestId('level-fill').evaluate((el) => parseFloat((el as HTMLElement).style.width));
+  await expect.poll(width).toBeGreaterThan(70);
   await expect(page.getByTestId('level-hint')).toHaveCount(0);
 
   // Chromium's fake devices are listed after permission; pick another one.

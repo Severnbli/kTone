@@ -54,6 +54,16 @@ export function hasSilentEdge(frame: Float32Array): boolean {
   return lead || trail;
 }
 
+/** True when `frame` holds `MIN_SILENT_RUN` digitally silent samples in a row anywhere (a dropout). */
+export function hasSilentRun(frame: Float32Array): boolean {
+  let run = 0;
+  for (let i = 0; i < frame.length; i++) {
+    run = Math.abs(frame[i]) <= DIGITAL_SILENCE ? run + 1 : 0;
+    if (run >= MIN_SILENT_RUN) return true;
+  }
+  return false;
+}
+
 const SHARP_NAMES: [Letter, number][] = [
   ['C', 0],
   ['C', 1],
@@ -208,7 +218,8 @@ class MockAnalyzer implements Analyzer {
     const loudEnough = rms >= this.noise.gate;
     // The detector runs below the gate too, so a quiet clear pitch is not learned as noise.
     const pitch = detectPitch(frame, this.sampleRate, this.diff);
-    this.noise.push(rms, pitch !== null);
+    // A dropout makes the frame quieter than the room: not learned as noise.
+    if (!hasSilentRun(frame)) this.noise.push(rms, pitch !== null);
     if (!loudEnough || !pitch) return this.unpitched();
     let [frequencyHz] = pitch;
     const clarity = pitch[1];

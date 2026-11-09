@@ -375,3 +375,31 @@ fn an_a4_change_keeps_the_floor_and_a_quiet_voice() {
     let (_, _, late) = *shown.last().unwrap();
     assert!((late + 7.85).abs() < 5.0, "{late}");
 }
+
+#[test]
+fn dropouts_in_the_stream_do_not_lower_the_floor() {
+    // A starved audio thread (typically right after the mic starts) inserts
+    // blocks of exact zeros. A frame with such a gap is quieter than the room,
+    // and the floor would follow it down at once: the gate then sits too low
+    // and a singer meant to be below it is shown.
+    let quiet = white(secs(2.0), -68.0, 19);
+    let reference = {
+        let mut t = new_tracker();
+        run(&mut t, &quiet);
+        db(t.noise_floor().expect("settled") as f64)
+    };
+    for gap in [16, 128, 512] {
+        let mut signal = quiet.clone();
+        for k in 0..8 {
+            let at = secs(0.05) + k * 5_003;
+            signal[at..at + gap].iter_mut().for_each(|v| *v = 0.0);
+        }
+        let mut t = new_tracker();
+        run(&mut t, &signal);
+        let floor = db(t.noise_floor().expect("settled") as f64);
+        assert!(
+            (floor - reference).abs() < 0.3,
+            "gap {gap}: floor {floor:.1} dBFS, {reference:.1} without dropouts"
+        );
+    }
+}

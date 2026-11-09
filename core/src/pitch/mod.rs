@@ -70,7 +70,8 @@
 //! floor, so a sustained note, its vibrato dips and its reverb tail cannot
 //! drag it up; any frame quieter than the floor lowers it at once. The floor
 //! therefore falls immediately and rises only after a whole window of louder
-//! noise. The gate is the floor plus [`GATE_MARGIN_DB`], clamped to
+//! noise. Frames with a run of digital silence (a dropout in the stream)
+//! are not learned at all. The gate is the floor plus [`GATE_MARGIN_DB`], clamped to
 //! [`GATE_MIN_DBFS`]..[`GATE_MAX_DBFS`]; until [`NOISE_SETTLE_SECS`] of
 //! unpitched frames are seen it is `rms_threshold`. See
 //! [`PitchTracker::noise_floor`] and [`PitchTracker::gate`].
@@ -599,6 +600,23 @@ fn fill_basis(
 
 /// `true` when `frame` starts or ends with a run of at least
 /// `MIN_SILENT_RUN` digitally silent samples.
+/// Whether `frame` holds `MIN_SILENT_RUN` digitally silent samples in a row
+/// anywhere: a dropout in the stream (or a muted input), not room noise.
+fn has_silent_run(frame: &[f32]) -> bool {
+    let mut run = 0;
+    for &v in frame {
+        run = if v.abs() <= DIGITAL_SILENCE {
+            run + 1
+        } else {
+            0
+        };
+        if run >= MIN_SILENT_RUN {
+            return true;
+        }
+    }
+    false
+}
+
 fn has_silent_edge(frame: &[f32]) -> bool {
     let silent = |run: &[f32]| run.iter().all(|v| v.abs() <= DIGITAL_SILENCE);
     let n = frame.len();
@@ -1060,10 +1078,13 @@ impl PitchTracker {
         if has_silent_edge(frame) {
             return self.invalid();
         }
+        // A dropout inside the frame makes it quieter than the room: it must
+        // not pull the noise floor down.
+        let learn_noise = self.config.auto_gate && !has_silent_run(frame);
         // Gates are written as "passes" checks so a NaN threshold rejects the frame.
         let loud_enough = rms >= self.gate_f64();
         if !loud_enough {
-            if self.config.auto_gate {
+            if learn_noise {
                 // The full detector even below the gate: a quiet but clear
                 // pitch (a soft voice, a hum) must not be learned as noise.
                 let est = self.mpm.detect(frame);
@@ -1072,7 +1093,7 @@ impl PitchTracker {
             return self.invalid();
         }
         let est = self.detect(frame);
-        if self.config.auto_gate {
+        if learn_noise {
             self.noise.push(rms, self.confident(est));
         }
         let Some(est) = est else {

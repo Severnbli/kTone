@@ -172,6 +172,34 @@ describe.skipIf(!hasWasm)('mock vs WASM engine: the same displayed notes', () =>
     }
   });
 
+  it('dropouts in the stream do not lower the noise floor', async () => {
+    const floorOf = (a: Analyzer, gaps: boolean) => {
+      // White noise at -68 dBFS for 1.5 s, hop by hop, with 128-sample gaps of
+      // exact zeros (a starved audio thread) when `gaps` is set.
+      let x = 3;
+      const next = () => {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        return (x >>> 0) / 2 ** 32 - 0.5;
+      };
+      const signal = Float32Array.from(
+        { length: 1.5 * SR },
+        () => Math.sqrt(12) * 10 ** (-68 / 20) * next(),
+      );
+      if (gaps) for (let k = 0; k < 8; k++) signal.fill(0, 2400 + k * 5003, 2400 + k * 5003 + 512);
+      track(a, signal);
+      return 20 * Math.log10(a.noiseFloor!);
+    };
+    for (const [engine, a] of await engines()) {
+      const clean = floorOf(a, false);
+      a.dispose();
+      const [, b] = (await engines()).find(([name]) => name === engine)!;
+      expect(Math.abs(floorOf(b, true) - clean), engine).toBeLessThan(0.3);
+      b.dispose();
+    }
+  });
+
   it('input glitches in the leaked drone never show a note', async () => {
     const c3 = midiToHz(48);
     // The drone as the mic hears it from the speakers (see scripts/gen-wav.mjs).

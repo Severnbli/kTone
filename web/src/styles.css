@@ -749,6 +749,16 @@ select {
   background: var(--zone-red);
 }
 
+.level-floor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--text);
+  opacity: 0.12;
+}
+
 .level-gate {
   position: absolute;
   top: 0;
@@ -757,6 +767,12 @@ select {
   margin-left: -1px;
   background: var(--text);
   opacity: 0.7;
+  transition: left 120ms linear;
+}
+
+.level-floor[hidden],
+.level-gate[hidden] {
+  display: none;
 }
 
 .level-info {

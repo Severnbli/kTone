@@ -9,7 +9,9 @@
 //   page is visible (now, or when it becomes visible); otherwise the UI offers
 //   `resume()` from a user gesture, which restarts the mic if resuming fails;
 // - page hidden for BACKGROUND_STOP_MS -> stop, stopReason `background`;
-// - input device changed while active -> the mic session is restarted on it.
+// - input device changed while active -> the mic session is restarted on it;
+// - low range switched while active -> the session is restarted with an
+//   analyzer built for it (the frame size changes).
 
 import type { Analyzer, AnalyzerFactory, AnalyzerSettings } from '../engine/types';
 import type { DebugStats } from './debugStats';
@@ -54,6 +56,7 @@ export class PitchEngine {
   private unwatch: (() => void) | null = null;
   private resuming = false;
   private deviceId = '';
+  private lowRange = false;
 
   constructor(
     private readonly store: PitchStore,
@@ -80,6 +83,7 @@ export class PitchEngine {
     const gen = ++this.generation;
     this.settings = settings;
     const deviceId = this.deviceId;
+    const lowRange = this.lowRange;
     let scheduler: FrameScheduler | null = null;
     const mic = await this.deps.startMic((block) => scheduler?.push(block), {
       onStateChange: (state) => this.onMicState(gen, state),
@@ -91,7 +95,7 @@ export class PitchEngine {
     }
     let analyzer: Analyzer;
     try {
-      analyzer = await this.deps.factory(mic.sampleRate);
+      analyzer = await this.deps.factory(mic.sampleRate, { lowRange });
     } catch (err) {
       await mic.stop();
       throw err;
@@ -135,8 +139,8 @@ export class PitchEngine {
     const state = mic.state;
     if (state === 'ended') return this.halt('ended');
     this.setState({ status: state === 'running' ? 'running' : 'suspended', stopReason: null });
-    // The device was changed while this session was opening.
-    if (deviceId !== this.deviceId) return this.restart();
+    // The device or the range was changed while this session was opening.
+    if (deviceId !== this.deviceId || lowRange !== this.lowRange) return this.restart();
     if (state === 'suspended') void this.tryResume();
   }
 
@@ -163,6 +167,17 @@ export class PitchEngine {
   async setDevice(deviceId: string): Promise<void> {
     if (deviceId === this.deviceId) return;
     this.deviceId = deviceId;
+    await this.restart();
+  }
+
+  /**
+   * Low range mode for the next session (see `AnalyzerOptions.lowRange`).
+   * While active, restarts the session with a new analyzer; on failure the
+   * engine goes idle and the error is rethrown.
+   */
+  async setLowRange(on: boolean): Promise<void> {
+    if (on === this.lowRange) return;
+    this.lowRange = on;
     await this.restart();
   }
 

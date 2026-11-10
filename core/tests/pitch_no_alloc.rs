@@ -2,7 +2,7 @@
 //! noise floor and the automatic gate) never allocate.
 //! Uses a counting global allocator, so it lives in its own test binary.
 
-use ktone_core::pitch::{Mpm, PitchTracker, TrackerConfig};
+use ktone_core::pitch::{Mpm, PitchTracker, TrackerConfig, LOW_RANGE_FRAME_SIZE};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -85,6 +85,16 @@ fn detect_and_process_do_not_allocate() {
     let mut mpm = Mpm::new(sr, n);
     let mut tracker = PitchTracker::new(sr, n, TrackerConfig::default());
     let mut drone_tracker = PitchTracker::new(sr, n, TrackerConfig::default());
+    // Low range mode: a 4096 frame, G1 and a leap up into the short window.
+    let low_n = LOW_RANGE_FRAME_SIZE;
+    let low_config = TrackerConfig::for_hop(sr, 512).low_range(low_n, 512);
+    let mut low_tracker = PitchTracker::new(sr, low_n, low_config);
+    let low: Vec<f32> = (0..36000)
+        .map(|i| {
+            let f = [49.0, 98.0, 392.0][i / 12000];
+            0.3 * (std::f32::consts::TAU * f * i as f32 / sr).sin()
+        })
+        .collect();
 
     let before = allocations();
     let mut pitched = 0;
@@ -120,6 +130,15 @@ fn detect_and_process_do_not_allocate() {
             let _ = mpm.periodic_residual(&[220.0, 440.0, 1320.0, 2200.0], 48000.0 / 220.0);
             let _ = mpm.residual_at(109.0);
         }
+    }
+    for frame in low.windows(low_n).step_by(512) {
+        if low_tracker.process(frame, 440.0).is_some() {
+            pitched += 1;
+        }
+    }
+    low_tracker.set_drone(Some(49.0), true);
+    for frame in low.windows(low_n).step_by(512).take(20) {
+        let _ = low_tracker.process(frame, 440.0);
     }
     drone_tracker.set_drone(Some(221.0), false);
     for frame in [&silence[..], &nan[..], &octave_up[..], &signal[..n - 1]] {

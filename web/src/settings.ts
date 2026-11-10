@@ -32,6 +32,8 @@ export interface Settings {
   target: Target;
   /** Audio input `deviceId`; `''` is the system default. */
   micDeviceId: string;
+  /** Low range mode: notes down to G1 for octavist basses, at a little more delay. */
+  lowRange: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -48,6 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
   droneTarget: false,
   target: DEFAULT_TARGET,
   micDeviceId: '',
+  lowRange: false,
 };
 
 /** Device ids are opaque strings (Chrome: 64 hex chars); anything longer is junk. */
@@ -70,6 +73,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     ? clamp(zonesRaw.yellow, green, 50)
     : Math.max(green, d.zones.yellow);
   const droneRaw = (r.drone ?? {}) as Record<string, unknown>;
+  const lowRange = typeof r.lowRange === 'boolean' ? r.lowRange : d.lowRange;
   return {
     lang: r.lang === 'en' || r.lang === 'ru' ? r.lang : d.lang,
     theme: THEMES.includes(r.theme as Theme) ? (r.theme as Theme) : d.theme,
@@ -88,11 +92,12 @@ export function sanitizeSettings(raw: unknown): Settings {
     },
     droneFilter: typeof r.droneFilter === 'boolean' ? r.droneFilter : d.droneFilter,
     droneTarget: typeof r.droneTarget === 'boolean' ? r.droneTarget : d.droneTarget,
-    target: sanitizeTarget(r.target, key),
+    target: sanitizeTarget(r.target, key, lowRange),
     micDeviceId:
       typeof r.micDeviceId === 'string' && r.micDeviceId.length <= MAX_DEVICE_ID_LENGTH
         ? r.micDeviceId
         : d.micDeviceId,
+    lowRange,
   };
 }
 

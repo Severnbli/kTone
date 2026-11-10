@@ -52,6 +52,9 @@ export const ru = {
   droneVolumeLong: 'Громкость бурдона',
   droneWarning: 'Используйте наушники, чтобы бурдон не мешал распознаванию.',
   droneFilter: 'Не принимать бурдон за голос',
+  lowRange: 'Низкий диапазон',
+  lowRangeNote:
+    'Для басов-октавистов: ноты вниз до соль контроктавы. Отклик чуть медленнее (≈ 40 мс).',
   droneLeak: 'Микрофон слышит бурдон – подключите наушники или уменьшите громкость.',
   staff: 'Нотный стан',
   pitchCurve: 'Кривая высоты',
@@ -178,6 +181,8 @@ export const en: Strings = {
   droneVolumeLong: 'Drone volume',
   droneWarning: 'Use headphones so the drone does not disturb detection.',
   droneFilter: 'Do not mistake the drone for the voice',
+  lowRange: 'Low range',
+  lowRangeNote: 'For octavist basses: notes down to G1. Responds a little slower (≈ 40 ms).',
   droneLeak: 'The microphone hears the drone – use headphones or turn the volume down.',
   staff: 'Staff',
   pitchCurve: 'Pitch curve',

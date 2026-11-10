@@ -29,6 +29,8 @@ interface Props {
   clef: ClefId;
   naming: NoteNaming;
   degreeStyle: DegreeStyle;
+  /** Low range mode: octaves down to G1 are offered. */
+  lowRange?: boolean;
   onChange: (target: Target) => void;
   /** Source of the last sung note, which a fresh target starts near. */
   store?: PitchStore;
@@ -49,6 +51,7 @@ export function TargetControls({
   clef,
   naming,
   degreeStyle,
+  lowRange = false,
   onChange,
   store,
 }: Props) {
@@ -58,19 +61,23 @@ export function TargetControls({
   const lastMidi = store?.getNote()?.stableMidi ?? null;
   const shown = target.enabled
     ? target
-    : { ...defaultTarget(keySpec, clef, lastMidi), enabled: false };
+    : { ...defaultTarget(keySpec, clef, lastMidi, lowRange), enabled: false };
   const note = targetNote(keySpec, shown.degree, shown.octave);
   const full = formatNote(note, naming, lang).full;
-  const range = octaveRange(keySpec, shown.degree);
+  const range = octaveRange(keySpec, shown.degree, lowRange);
   const solfegeRu = naming === 'solfege' && lang === 'ru';
 
   const pick = (degree: number) =>
-    onChange({ enabled: true, degree, octave: clampOctave(keySpec, degree, shown.octave) });
+    onChange({
+      enabled: true,
+      degree,
+      octave: clampOctave(keySpec, degree, shown.octave, lowRange),
+    });
   const step = (by: number) =>
     onChange({
       enabled: true,
       degree: shown.degree,
-      octave: clampOctave(keySpec, shown.degree, shown.octave + by),
+      octave: clampOctave(keySpec, shown.degree, shown.octave + by, lowRange),
     });
 
   return (

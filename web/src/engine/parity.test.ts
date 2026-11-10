@@ -231,3 +231,78 @@ describe.skipIf(!hasWasm)('mock vs WASM engine: the same displayed notes', () =>
     }
   });
 });
+
+describe.skipIf(!hasWasm)('mock vs WASM engine in low range mode', () => {
+  async function lowEngines(): Promise<[string, Analyzer][]> {
+    const opts = { lowRange: true };
+    const list: [string, Analyzer][] = [
+      ['mock', await createMockAnalyzer(SR, opts)],
+      ['wasm', await loadWasmAnalyzer(SR, opts)],
+    ];
+    for (const [, a] of list) a.configure({ ...SETTINGS, key: { ...SETTINGS.key } });
+    return list;
+  }
+
+  it('both use the long frame', async () => {
+    for (const [engine, a] of await lowEngines()) {
+      expect(a.frameSize, engine).toBe(4096);
+      expect(a.hopSize, engine).toBe(512);
+      a.dispose();
+    }
+  });
+
+  it.each([31, 32, 33, 34, 35, 36])('MIDI %i (G1–C2) is shown, not an octave up', async (midi) => {
+    for (const [engine, a] of await lowEngines()) {
+      const out = track(
+        a,
+        synth(1, () => midi),
+      );
+      const shown = notes(out, 0, 1);
+      expect(shown.length, engine).toBeGreaterThan(80);
+      expect(new Set(shown), engine).toEqual(new Set([midi]));
+      a.dispose();
+    }
+  });
+
+  it('a vibrato on G1 never switches the note', async () => {
+    for (const [engine, a] of await lowEngines()) {
+      const out = track(
+        a,
+        synth(2, (t) => 31 + 0.4 * Math.sin(2 * Math.PI * 5 * t)),
+      );
+      const shown = notes(out, 0.3, 2);
+      expect(shown.length, engine).toBeGreaterThan(150);
+      expect(new Set(shown), engine).toEqual(new Set([31]));
+      a.dispose();
+    }
+  });
+
+  it('a leap from G1 to G3 is followed', async () => {
+    for (const [engine, a] of await lowEngines()) {
+      const out = track(
+        a,
+        synth(1.6, (t) => (t < 0.8 ? 31 : 55)),
+      );
+      expect(new Set(notes(out, 0.2, 0.8)), engine).toEqual(new Set([31]));
+      expect(new Set(notes(out, 1.0, 1.6)), engine).toEqual(new Set([55]));
+      a.dispose();
+    }
+  });
+
+  it('notes under the floor (F1) are not shown', async () => {
+    for (const [engine, a] of await lowEngines()) {
+      expect(
+        notes(
+          track(
+            a,
+            synth(1, () => 29),
+          ),
+          0,
+          1,
+        ),
+        engine,
+      ).toEqual([]);
+      a.dispose();
+    }
+  });
+});

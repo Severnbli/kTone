@@ -81,6 +81,16 @@ describe('SettingsPanel', () => {
     expect(last().droneFilter).toBe(true);
   });
 
+  it('toggles low range', () => {
+    const { last } = setup();
+    const box = screen.getByRole('switch', { name: 'Низкий диапазон' });
+    expect(box).not.toBeChecked();
+    expect(screen.getByText(/вниз до соль контроктавы/)).toBeInTheDocument();
+    fireEvent.click(box);
+    expect(last().lowRange).toBe(true);
+    expect(box).toBeChecked();
+  });
+
   it('sets the drone octave and volume', () => {
     const { last } = setup();
     fireEvent.click(screen.getByLabelText('до первой октавы'));

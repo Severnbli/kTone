@@ -30,7 +30,7 @@ fn reports_frame_layout_size() {
 
 #[test]
 fn reports_vibrato_center() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     let mut out = vec![0.0; FRAME_FIELDS];
     let mut centers = Vec::new();
     let mut raw = Vec::new();
@@ -64,7 +64,7 @@ fn reports_vibrato_center() {
 
 #[test]
 fn detects_a4_in_c_major_treble() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     assert_eq!(a.frame_size(), FRAME);
     assert_eq!(a.hop_size(), HOP);
     let out = run(&mut a, 440.0).expect("pitched");
@@ -82,7 +82,7 @@ fn detects_a4_in_c_major_treble() {
 
 #[test]
 fn spells_by_key() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     // D major (D=1): MIDI 66 -> F sharp.
     assert!(a.configure(1, 0, 0, 0, 440.0));
     assert_eq!(a.spell(66), vec![3, 1, 4]);
@@ -93,7 +93,7 @@ fn spells_by_key() {
 
 #[test]
 fn rejects_unsupported_key_and_keeps_previous() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     assert!(a.configure(1, 0, 0, 0, 440.0));
     // G sharp major does not exist as a practical key.
     assert!(!a.configure(4, 1, 0, 0, 440.0));
@@ -102,7 +102,7 @@ fn rejects_unsupported_key_and_keeps_previous() {
 
 #[test]
 fn uses_clef_and_reference() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     assert!(a.configure(0, 0, 0, 2, 442.0)); // C major, bass clef, A4 = 442
     let out = run(&mut a, 442.0).expect("pitched");
     assert_eq!(out[2], 69.0);
@@ -111,7 +111,7 @@ fn uses_clef_and_reference() {
 
 #[test]
 fn silence_and_short_output_buffer_return_false() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     let mut out = vec![0.0; FRAME_FIELDS];
     assert!(!a.process(&vec![0.0; FRAME], &mut out));
     let mut short = vec![0.0; 3];
@@ -156,7 +156,7 @@ fn count(a: &mut Analyzer, freq: f32, harmonics: &[f32]) -> (usize, usize) {
 fn drone_filter_ignores_the_drone_but_not_a_voice() {
     let drone = [1.0, 0.2];
     let voice = [1.0, 0.6, 0.4, 0.3, 0.2];
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     assert_eq!(count(&mut a, 220.0, &drone), (20, 0));
 
     a.set_drone(220.0, true);
@@ -176,7 +176,7 @@ fn drone_filter_ignores_the_drone_but_not_a_voice() {
 
 #[test]
 fn reports_the_noise_floor_and_gate_on_unpitched_frames() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     assert_eq!(a.noise_floor(), 0.0);
     assert!((a.gate() - 0.005).abs() < 1e-6);
     // White-ish noise at about −50 dBFS RMS for one second.
@@ -203,7 +203,7 @@ fn reports_the_noise_floor_and_gate_on_unpitched_frames() {
 
 #[test]
 fn an_a4_change_keeps_the_noise_floor_and_respells_at_once() {
-    let mut a = Analyzer::new(SR, FRAME, HOP);
+    let mut a = Analyzer::new(SR, FRAME, HOP, false);
     let mut seed = 11u32;
     let noise: Vec<f32> = (0..SR as usize)
         .map(|_| {
@@ -231,4 +231,24 @@ fn an_a4_change_keeps_the_noise_floor_and_respells_at_once() {
     assert_eq!(out[2], 69.0);
     assert!((out[3] + 7.85).abs() < 1.0, "cents {}", out[3]);
     assert!(a.noise_floor() > 0.0);
+}
+
+#[test]
+fn low_range_reaches_g1() {
+    let low_frame = ktone_wasm::low_range_frame_size();
+    assert_eq!(low_frame, 4096);
+    let g1 = 440.0 * ((31.0f32 - 69.0) / 12.0).exp2();
+    let mut out = vec![0.0; FRAME_FIELDS];
+    let mut low = Analyzer::new(SR, low_frame, HOP, true);
+    assert_eq!(low.frame_size(), low_frame);
+    let mut shown = None;
+    for hop in 0..20 {
+        if low.process(&sine(g1, low_frame, hop * HOP), &mut out) {
+            shown = Some(out[2]);
+        }
+    }
+    assert_eq!(shown, Some(31.0));
+    // Off by default: G1 is under the normal floor.
+    let mut normal = Analyzer::new(SR, FRAME, HOP, false);
+    assert!(run(&mut normal, g1).is_none());
 }

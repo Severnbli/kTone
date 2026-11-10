@@ -17,6 +17,14 @@ const leakedDrone = (phase) =>
   0.06 * (Math.sin(phase) + 0.2 * Math.sin(2 * phase) - 0.0225 * Math.sin(6 * phase));
 
 const C3 = 440 * 2 ** (-21 / 12);
+const G1 = 440 * 2 ** (-38 / 12);
+
+// A low bass voice: the 2nd harmonic stronger than the fundamental.
+const bassVoice = (phase) =>
+  0.12 * Math.sin(phase) +
+  0.3 * Math.sin(2 * phase) +
+  0.2 * Math.sin(3 * phase) +
+  0.1 * Math.sin(4 * phase);
 
 // name: [frequency, waveform of the phase, seconds, noise level]
 const FIXTURES = {
@@ -26,6 +34,8 @@ const FIXTURES = {
   'a440-loud.wav': [440, sine(1)],
   // The default drone (C major, octave 3, A4 = 440) leaking into the mic.
   'drone-c3.wav': [C3, leakedDrone, 2, 0.0003],
+  // G1 (49 Hz), shown only in low range mode.
+  'g1.wav': [G1, bassVoice],
 };
 
 /** xorshift32, so the fixtures are reproducible. */

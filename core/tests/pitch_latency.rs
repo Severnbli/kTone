@@ -16,7 +16,7 @@
 //! in `docs/decisions.md`; buffering in the browser (input latency, message
 //! passing, the next display frame) comes on top.
 
-use ktone_core::pitch::{PitchTracker, TrackedPitch, TrackerConfig};
+use ktone_core::pitch::{PitchTracker, TrackedPitch, TrackerConfig, LOW_RANGE_FRAME_SIZE};
 use std::f64::consts::TAU;
 
 const FRAME: usize = 2048;
@@ -144,7 +144,7 @@ fn settle(frames: &[(f64, Option<TrackedPitch>)], ok: impl Fn(&TrackedPitch) -> 
     first.map_or(f64::INFINITY, |i| frames[i].0 * 1000.0)
 }
 
-fn measure(c: Case, align: usize) -> Delays {
+fn measure(c: Case, align: usize, low_range: bool) -> Delays {
     // The onset lands `align` samples after a frame boundary of the hop grid.
     let onset_sample = (BEFORE * SR) as usize / HOP * HOP + align;
     let onset = onset_sample as f64 / SR;
@@ -158,13 +158,20 @@ fn measure(c: Case, align: usize) -> Delays {
         };
         base + vib
     });
-    let mut tracker = PitchTracker::new(SR as f32, FRAME, TrackerConfig::for_hop(SR as f32, HOP));
+    let mut config = TrackerConfig::for_hop(SR as f32, HOP);
+    let frame = if low_range {
+        config = config.low_range(LOW_RANGE_FRAME_SIZE, HOP);
+        LOW_RANGE_FRAME_SIZE
+    } else {
+        FRAME
+    };
+    let mut tracker = PitchTracker::new(SR as f32, frame, config);
     let frames: Vec<(f64, Option<TrackedPitch>)> = signal
-        .windows(FRAME)
+        .windows(frame)
         .step_by(HOP)
         .enumerate()
         .map(|(i, f)| {
-            let end = (i * HOP + FRAME) as f64 / SR;
+            let end = (i * HOP + frame) as f64 / SR;
             (end - onset, tracker.process(f, 440.0))
         })
         .filter(|(t, _)| *t > 0.0)
@@ -182,17 +189,60 @@ fn measure(c: Case, align: usize) -> Delays {
 
 #[test]
 fn step_latency_table() {
+    latency_table(&CASES, false, bounds);
+}
+
+const LOW_CASES: [Case; 8] = [
+    case("G1 -> A1", 31.0, 33.0, false),
+    case("C2 -> G1", 36.0, 31.0, false),
+    case("G1 semitone + vib", 31.0, 32.0, true),
+    case("bass E2 -> G2", 40.0, 43.0, false),
+    case("bass fourth down", 50.0, 45.0, false),
+    case("tenor fifth up", 55.0, 62.0, false),
+    case("tenor octave up", 55.0, 67.0, false),
+    case("soprano sixth down", 81.0, 72.0, false),
+];
+
+/// Low range mode: a leap is re-checked on the full 4096 frame, so every
+/// note change is shown about 40 ms later than in the default mode (bound
+/// +45 ms, +60 ms for the center). The longer transition stays in the center of the new note, so a
+/// straight tone is ready only after 3/5 of the center window (bound +150 ms).
+#[test]
+fn low_range_step_latency_table() {
+    latency_table(&LOW_CASES, true, |c| {
+        let b = bounds(c);
+        Bounds {
+            midi: b.midi + 45.0,
+            stable: b.stable + 45.0,
+            center: b.center + 60.0,
+            ready: b.ready + 150.0,
+        }
+    });
+}
+
+fn latency_table(cases: &[Case], low_range: bool, bounds: impl Fn(&Case) -> Bounds) {
     println!(
         "\n{:<22} {:>13} {:>13} {:>13} {:>13}",
-        "step (48 kHz)", "(a) midi", "(b) stable", "(c) center", "(d) ready"
+        if low_range {
+            "low range (48 kHz)"
+        } else {
+            "step (48 kHz)"
+        },
+        "(a) midi",
+        "(b) stable",
+        "(c) center",
+        "(d) ready"
     );
     println!(
         "{:<22} {:>13} {:>13} {:>13} {:>13}",
         "", "mean / max", "mean / max", "mean / max", "mean / max"
     );
     let mut failures = Vec::new();
-    for c in CASES {
-        let runs: Vec<Delays> = ALIGNMENTS.iter().map(|&a| measure(c, a)).collect();
+    for &c in cases {
+        let runs: Vec<Delays> = ALIGNMENTS
+            .iter()
+            .map(|&a| measure(c, a, low_range))
+            .collect();
         let stat = |f: fn(&Delays) -> f64| {
             let v: Vec<f64> = runs.iter().map(f).collect();
             let max = v.iter().cloned().fold(0.0, f64::max);

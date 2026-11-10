@@ -396,6 +396,60 @@ describe('PitchEngine input device', () => {
   });
 });
 
+describe('PitchEngine low range', () => {
+  function setup() {
+    const mic = fakeMic();
+    const store = new PitchStore();
+    const factory = vi.fn(createMockAnalyzer);
+    const engine = new PitchEngine(store, {
+      factory,
+      startMic: mic.startMic,
+      now: () => 0,
+      visibility: fakeVisibility(),
+    });
+    const states: EngineState[] = [];
+    engine.subscribe((s) => states.push(s));
+    return { mic, store, engine, states, factory };
+  }
+  const G1 = 440 * 2 ** ((31 - 69) / 12);
+
+  it('is off by default: G1 is not shown', async () => {
+    const { engine, mic, store, factory } = setup();
+    await engine.start(settings);
+    expect(factory).toHaveBeenLastCalledWith(expect.any(Number), { lowRange: false });
+    mic.feedSine(G1, 4096 + 512 * 8);
+    expect(store.getNote()).toBeNull();
+  });
+
+  it('builds a long-frame analyzer for the next session', async () => {
+    const { engine, mic, store, factory } = setup();
+    await engine.setLowRange(true);
+    expect(mic.startMic).not.toHaveBeenCalled();
+    await engine.start(settings);
+    expect(factory).toHaveBeenLastCalledWith(expect.any(Number), { lowRange: true });
+    mic.feedSine(G1, 4096 + 512 * 8);
+    expect(store.getNote()?.stableMidi).toBe(31);
+  });
+
+  it('restarts a running session when switched', async () => {
+    const { engine, mic, store, states, factory } = setup();
+    await engine.start(settings);
+    await engine.setLowRange(true);
+    expect(mic.stop).toHaveBeenCalledTimes(1);
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    expect(factory).toHaveBeenLastCalledWith(expect.any(Number), { lowRange: true });
+    expect(states.map((s) => s.status)).toEqual(['running']);
+    mic.feedSine(G1, 4096 + 512 * 8);
+    expect(store.getNote()?.stableMidi).toBe(31);
+
+    // Same value: nothing happens.
+    await engine.setLowRange(true);
+    expect(mic.startMic).toHaveBeenCalledTimes(2);
+    await engine.setLowRange(false);
+    expect(factory).toHaveBeenLastCalledWith(expect.any(Number), { lowRange: false });
+  });
+});
+
 describe('classifyMicError', () => {
   it('maps DOMException names', () => {
     expect(classifyMicError(new DOMException('x', 'NotAllowedError'))).toBe('denied');

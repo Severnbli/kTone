@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Generates the Open Graph / Twitter Card preview image from assets/brand/.
 
-Usage: python3 scripts/make-og-image.py [OUT] [--font PATH] [--font-regular PATH]
-       (default OUT: web/public/og-image.png)
+Usage: python3 scripts/make-og-image.py [OUT] [--social] [--font PATH] [--font-regular PATH]
+       (default OUT: web/public/og-image.png, or assets/brand/social-preview.png with --social)
 
 The image is 1200x630: the kTone banner on the brand background with a short
-Russian tagline. The tagline needs a sans-serif font with Cyrillic glyphs; by
+Russian tagline. With --social it is the GitHub repository social preview
+instead: 1280x640 with an English tagline (upload it in the repository
+Settings, General, Social preview; GitHub has no API for it). The tagline needs a sans-serif font with Cyrillic glyphs; by
 default the first of FONT_CANDIDATES that exists is used (DejaVu Sans or Noto
 Sans, packaged as fonts-dejavu-core / fonts-noto-core on Debian and Ubuntu).
 Requires Pillow.
@@ -18,8 +20,10 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 BRAND = ROOT / "assets" / "brand"
 DEFAULT_OUT = ROOT / "web" / "public" / "og-image.png"
+SOCIAL_OUT = BRAND / "social-preview.png"
 
 SIZE = (1200, 630)
+SOCIAL_SIZE = (1280, 640)
 # Same background as the app icon and the manifest theme color.
 BACKGROUND = (30, 11, 73)
 TEXT = (255, 255, 255)
@@ -27,6 +31,8 @@ MUTED = (196, 188, 226)
 
 TITLE = "Тюнер для голоса"
 SUBTITLE = "Нота, центы и тональность в реальном времени"
+SOCIAL_TITLE = "Pitch detector for singers"
+SOCIAL_SUBTITLE = "Note, cents and key-aware notation in real time"
 
 FONT_DIRS = (
     "/usr/share/fonts/truetype/dejavu",
@@ -55,16 +61,17 @@ def trim(img: Image.Image) -> Image.Image:
     return img.crop(mask.getbbox())
 
 
-def centered_text(draw: ImageDraw.ImageDraw, y: int, text: str, font, fill) -> int:
+def centered_text(draw: ImageDraw.ImageDraw, width: int, y: int, text: str, font, fill) -> int:
     """Draws `text` horizontally centered with its top at `y`; returns its bottom."""
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
-    draw.text(((SIZE[0] - (right - left)) // 2 - left, y - top), text, font=font, fill=fill)
+    draw.text(((width - (right - left)) // 2 - left, y - top), text, font=font, fill=fill)
     return y + bottom - top
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("out", nargs="?", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("out", nargs="?", type=Path)
+    parser.add_argument("--social", action="store_true", help="GitHub social preview (1280x640, English)")
     parser.add_argument("--font", help="bold TTF/OTF with Cyrillic for the title")
     parser.add_argument("--font-regular", help="regular TTF/OTF with Cyrillic for the subtitle")
     args = parser.parse_args()
@@ -72,22 +79,27 @@ def main() -> None:
     bold = ImageFont.truetype(args.font or find_font(BOLD_CANDIDATES), 64)
     regular = ImageFont.truetype(args.font_regular or find_font(REGULAR_CANDIDATES), 36)
 
-    canvas = Image.new("RGB", SIZE, BACKGROUND)
+    size, title, subtitle = (
+        (SOCIAL_SIZE, SOCIAL_TITLE, SOCIAL_SUBTITLE) if args.social else (SIZE, TITLE, SUBTITLE)
+    )
+    out = args.out or (SOCIAL_OUT if args.social else DEFAULT_OUT)
+
+    canvas = Image.new("RGB", size, BACKGROUND)
     banner = trim(Image.open(BRAND / "banner.png").convert("RGBA"))
     width = 900
     banner = banner.resize((width, round(banner.height * width / banner.width)), Image.LANCZOS)
     top = 122
-    canvas.paste(banner, ((SIZE[0] - width) // 2, top), banner)
+    canvas.paste(banner, ((size[0] - width) // 2, top), banner)
 
     draw = ImageDraw.Draw(canvas)
-    y = centered_text(draw, top + banner.height + 70, TITLE, bold, TEXT)
-    centered_text(draw, y + 28, SUBTITLE, regular, MUTED)
+    y = centered_text(draw, size[0], top + banner.height + 70, title, bold, TEXT)
+    centered_text(draw, size[0], y + 28, subtitle, regular, MUTED)
 
     # A palette keeps the flat-color image small (well under 150 KB).
     canvas.quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).save(
-        args.out, optimize=True
+        out, optimize=True
     )
-    print(args.out, args.out.stat().st_size, "bytes")
+    print(out, out.stat().st_size, "bytes")
 
 
 if __name__ == "__main__":

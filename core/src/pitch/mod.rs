@@ -80,8 +80,11 @@
 //! G1 (49 Hz), too few for a clear estimate, and the default `min_hz` stops
 //! just above C♯2 (70 Hz). [`TrackerConfig::low_range`] lowers `min_hz` to
 //! [`LOW_RANGE_MIN_HZ`] for a tracker built with a [`LOW_RANGE_FRAME_SIZE`]
-//! frame (4 periods of G1). The longer window adds about 43 ms of delay; the
-//! short window then is 2048 samples, used from about 94 Hz up.
+//! frame (4 periods of G1), whose longest lag (23 Hz) also keeps notes under
+//! the floor from being folded onto a wrong one. The short window then is
+//! 2048 samples, used from about 94 Hz up; leaps are still checked on the
+//! full frame, so a new note shows about 40 ms later than in the default
+//! mode (see `core/tests/pitch_latency.rs`).
 
 mod fft;
 

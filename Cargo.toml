@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["core", "wasm"]
+
+[profile.release]
+opt-level = 3
+lto = true
+
+# The drone and pitch tests run thousands of frames through the detector.
+[profile.test]
+opt-level = 2

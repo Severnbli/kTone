@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0918" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f3fb" media="(prefers-color-scheme: light)" />
+    <link rel="icon" href="/icons/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/icons/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>kTone – онлайн-тюнер для голоса: нота, центы, тональность</title>
+
+    <!-- SEO and link previews; the site origin comes from VITE_SITE_URL (seo/site.ts). -->
+    <meta
+      name="description"
+      content="Бесплатный тюнер для вокалистов: нота и отклонение в центах в реальном времени, учёт тональности, нотный стан, кривая высоты и бурдон. Работает офлайн."
+    />
+    <link rel="canonical" href="%VITE_SITE_URL%/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="kTone" />
+    <meta property="og:title" content="kTone – тюнер для голоса" />
+    <meta
+      property="og:description"
+      content="Пойте – и сразу видно, какая это нота, на сколько центов вы промахнулись и попали ли в цель. С учётом тональности, на нотном стане, бесплатно."
+    />
+    <meta property="og:url" content="%VITE_SITE_URL%/" />
+    <meta property="og:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Логотип kTone и подпись «Тюнер для голоса»" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="kTone – тюнер для голоса" />
+    <meta
+      name="twitter:description"
+      content="Нота, центы и тональность в реальном времени. Бесплатный тюнер для вокалистов в браузере."
+    />
+    <meta name="twitter:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta name="twitter:image:alt" content="Логотип kTone и подпись «Тюнер для голоса»" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "kTone",
+        "url": "%VITE_SITE_URL%/",
+        "description": "Бесплатный тюнер для вокалистов: нота и отклонение в центах в реальном времени, учёт тональности, нотный стан, кривая высоты и бурдон.",
+        "applicationCategory": ["MusicApplication", "EducationalApplication"],
+        "operatingSystem": "Any (web browser)",
+        "browserRequirements": "Requires JavaScript and microphone access",
+        "inLanguage": ["ru", "en"],
+        "isAccessibleForFree": true,
+        "image": "%VITE_SITE_URL%/og-image.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "sameAs": "https://github.com/Severnbli/kTone",
+        "isBasedOn": {
+          "@type": "SoftwareSourceCode",
+          "name": "kTone",
+          "codeRepository": "https://github.com/Severnbli/kTone",
+          "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+          "programmingLanguage": ["Rust", "TypeScript"]
+        }
+      }
+    </script>
+
+    <!-- Static fallback inside #root: shown to crawlers and to browsers without
+         JavaScript, hidden as soon as JavaScript runs (React replaces it). -->
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
+    <style>
+      /* Same dark "stage" palette as src/styles.css; light when the system asks. */
+      .js .seo-fallback {
+        display: none;
+      }
+      body:has(.seo-fallback) {
+        margin: 0;
+        background: #0b0918;
+      }
+      .seo-fallback {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem;
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        line-height: 1.5;
+        color: #f5f3ff;
+      }
+      .seo-fallback h1,
+      .seo-fallback a {
+        color: #d8b4fe;
+      }
+      @media (prefers-color-scheme: light) {
+        body:has(.seo-fallback) {
+          background: #f5f3fb;
+        }
+        .seo-fallback {
+          color: #17122b;
+        }
+        .seo-fallback h1,
+        .seo-fallback a {
+          color: #6d28d9;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <main class="seo-fallback">
+        <h1>kTone – тюнер для голоса</h1>
+        <p>
+          kTone слушает микрофон и в реальном времени показывает, какую ноту вы поёте, на сколько
+          центов отклоняетесь и попали ли в цель. Для тех, кто учится петь.
+        </p>
+        <ul>
+          <li>Нота и отклонение в центах в реальном времени, зоны попадания.</li>
+          <li>
+            Правильная запись нот с учётом тональности: фа-диез в ре мажоре, соль-бемоль в ре-бемоль
+            мажоре, ступени лада.
+          </li>
+          <li>
+            Нота на нотном стане в пяти ключах: скрипичном, басовом, альтовом, теноровом и
+            скрипичном октавой ниже.
+          </li>
+          <li>Кривая высоты голоса за последние секунды.</li>
+          <li>Бурдон на тонике.</li>
+          <li>Работает офлайн как приложение (PWA) на телефоне, планшете и компьютере.</li>
+          <li>Бесплатно, без регистрации.</li>
+        </ul>
+        <p>
+          Открытый исходный код (GPL-3.0):
+          <a href="https://github.com/Severnbli/kTone">github.com/Severnbli/kTone</a>.
+        </p>
+        <noscript>
+          <p>
+            <strong>Для работы kTone нужен JavaScript. Включите его в настройках браузера.</strong>
+          </p>
+        </noscript>
+      </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

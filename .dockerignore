@@ -1,0 +1,8 @@
+target
+node_modules
+web/node_modules
+web/dist
+.git
+.claude
+web/src/wasm-pkg
+**/node_modules

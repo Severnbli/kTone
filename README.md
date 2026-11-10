@@ -1,1 +1,96 @@
-# kTone
+<p align="center">
+  <img src="assets/brand/banner-readme.png" alt="kTone" width="600">
+</p>
+
+<p align="center"><b>A smart pitch detector for people learning to sing.</b></p>
+
+<p align="center"><a href="https://ktone.severnbli.dev"><b>Try it at ktone.severnbli.dev</b></a></p>
+
+kTone listens to your voice and shows in real time which note you are singing, how many cents you are off, and whether you hit the target. Unlike a plain tuner it understands music notation: notes are spelled according to the selected key (F♯ in D major, G♭ in D♭ major), shown as scale degrees, and drawn on a staff in the selected clef.
+
+## Features
+
+- Real-time note, frequency and cents deviation with green / yellow / red hit zones
+- Accuracy judged by the vibrato center, so a natural vibrato is not counted as a miss
+- Key-aware spelling for all 30 major and minor keys, scale degrees, out-of-key highlighting
+- Staff in treble, treble 8vb, bass, alto and tenor clefs
+- Target note mode: pick a degree and octave, see it on the staff and the pitch curve, hear it in the drone
+- Pitch curve for the last few seconds
+- Drone on the tonic or the target, filtered out of detection when it leaks from the speakers into the mic
+- Input level meter with too-quiet / too-loud / noisy-room hints, automatic noise gate, microphone choice
+- Voice range E2 to C6, and an optional low range mode down to G1 for octavist basses
+- Solfège with Russian octave names or letter names (C4), configurable A4 (415–466 Hz)
+- Installable PWA that works offline, on phones, tablets and desktops; Russian and English UI
+- Pitch detection in Rust (McLeod pitch method) compiled to WebAssembly, with low latency from voice to screen
+
+## Self-hosting
+
+kTone is a static web app served by nginx on port 80 inside the container. Images on Docker Hub:
+
+- `severnbli/ktone:latest` – stable, built from `main`
+- `severnbli/ktone:dev` – the integration branch, updated on every merge
+- `severnbli/ktone:<branch>-<sha>` – a specific build
+
+### Docker Compose
+
+Save as `compose.yaml` and run `docker compose up -d`:
+
+```yaml
+services:
+  ktone:
+    image: severnbli/ktone:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+```
+
+Update to a newer image with `docker compose pull && docker compose up -d`.
+
+### docker run
+
+```sh
+docker run -d --name ktone --restart unless-stopped -p 8080:80 severnbli/ktone:latest
+```
+
+Either way the app is on http://localhost:8080. Browsers allow microphone access only on `localhost` or over HTTPS, so for any other host put it behind a reverse proxy with TLS (Caddy, Traefik, nginx) that forwards to port 8080.
+
+### Your own domain
+
+The canonical link, Open Graph and JSON-LD tags in the page, `robots.txt` and `sitemap.xml` point at the public origin, which is baked in at build time from `VITE_SITE_URL` (default `https://ktone.severnbli.dev`). The prebuilt images use the default, so if search engines or link previews should see your domain, build the image yourself:
+
+```sh
+docker build --target runtime --build-arg VITE_SITE_URL=https://tuner.example.org -t ktone .
+```
+
+Outside Docker, set `VITE_SITE_URL` in the environment or in `web/.env.production` before `pnpm -C web build`. It must be an absolute `http(s)` URL without a trailing slash; a path prefix is kept as is.
+
+## Development
+
+Requires Docker with Compose.
+
+```sh
+docker compose up web                    # dev server on http://localhost:5173
+docker compose run --rm dev cargo test --workspace
+docker compose --profile prod up app     # production image on http://localhost:8080
+```
+
+The microphone works only on `localhost` or over HTTPS.
+
+## Project layout
+
+```
+core/     Rust: pitch detection (MPM) and music theory
+wasm/     WebAssembly bindings for the core
+web/      React + TypeScript PWA
+scripts/  build helpers (WASM build, icons, Open Graph and social preview images)
+assets/   brand sources
+docs/     decision log
+```
+
+## Contributing
+
+Rules for humans and AI agents live in [AGENTS.md](AGENTS.md).
+
+## License
+
+[GPL-3.0](LICENSE)

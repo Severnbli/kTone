@@ -75,10 +75,22 @@
 //! [`GATE_MIN_DBFS`]..[`GATE_MAX_DBFS`]; until [`NOISE_SETTLE_SECS`] of
 //! unpitched frames are seen it is `rms_threshold`. See
 //! [`PitchTracker::noise_floor`] and [`PitchTracker::gate`].
+//!
+//! Low range: the default frame (2048 samples) holds barely two periods of
+//! G1 (49 Hz), too few for a clear estimate, and the default `min_hz` stops
+//! just above C♯2 (70 Hz). [`TrackerConfig::low_range`] lowers `min_hz` to
+//! [`LOW_RANGE_MIN_HZ`] for a tracker built with a [`LOW_RANGE_FRAME_SIZE`]
+//! frame (4 periods of G1). The longer window adds about 43 ms of delay; the
+//! short window then is 2048 samples, used from about 94 Hz up.
 
 mod fft;
 
 use fft::Fft;
+
+/// Lowest accepted frequency in low range mode: below G1 (49 Hz) with margin.
+pub const LOW_RANGE_MIN_HZ: f32 = 45.0;
+/// Frame size for low range mode: four periods of G1 at 48 kHz.
+pub const LOW_RANGE_FRAME_SIZE: usize = 4096;
 
 /// Key-maxima threshold `k` from the MPM paper.
 const KEY_MAX_THRESHOLD: f64 = 0.9;
@@ -740,6 +752,20 @@ impl TrackerConfig {
             config.drone_leak_memory = frames(DRONE_LEAK_MEMORY_SECS);
         }
         config
+    }
+
+    /// Low range mode (see the module docs): `min_hz` becomes
+    /// [`LOW_RANGE_MIN_HZ`], and `drone_confirm` is raised so that, as with
+    /// the default frame, it outlasts a glitch staying in a `frame_size`
+    /// frame for `frame_size / hop` frames. Use with a frame of at least
+    /// [`LOW_RANGE_FRAME_SIZE`] samples.
+    pub fn low_range(mut self, frame_size: usize, hop: usize) -> Self {
+        self.min_hz = LOW_RANGE_MIN_HZ;
+        if hop > 0 {
+            let frames = frame_size.div_ceil(hop).saturating_add(1);
+            self.drone_confirm = self.drone_confirm.max(frames).min(MAX_DRONE_FRAMES);
+        }
+        self
     }
 }
 

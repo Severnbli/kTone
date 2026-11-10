@@ -4,7 +4,7 @@
 //! be processed without creating JS objects on the Rust side. The TypeScript
 //! wrapper in `web/src/engine/index.ts` maps it to the `Analyzer` contract.
 
-use ktone_core::pitch::{PitchTracker, TrackerConfig};
+use ktone_core::pitch::{PitchTracker, TrackerConfig, LOW_RANGE_FRAME_SIZE};
 use ktone_core::theory::{Clef, Key, Letter, Mode, SpelledNote};
 use wasm_bindgen::prelude::*;
 
@@ -68,14 +68,17 @@ pub struct Analyzer {
 
 #[wasm_bindgen]
 impl Analyzer {
+    /// With `low_range`, notes down to G1 are accepted (see
+    /// `TrackerConfig::low_range`); pass a frame of at least
+    /// `lowRangeFrameSize()` samples then.
     #[wasm_bindgen(constructor)]
-    pub fn new(sample_rate: f32, frame_size: usize, hop_size: usize) -> Analyzer {
+    pub fn new(sample_rate: f32, frame_size: usize, hop_size: usize, low_range: bool) -> Analyzer {
+        let mut config = TrackerConfig::for_hop(sample_rate, hop_size);
+        if low_range {
+            config = config.low_range(frame_size, hop_size);
+        }
         Analyzer {
-            tracker: PitchTracker::new(
-                sample_rate,
-                frame_size,
-                TrackerConfig::for_hop(sample_rate, hop_size),
-            ),
+            tracker: PitchTracker::new(sample_rate, frame_size, config),
             frame_size,
             hop_size,
             key: c_major(),
@@ -220,6 +223,12 @@ pub fn all_keys() -> Vec<i8> {
 #[wasm_bindgen(js_name = keySignature)]
 pub fn key_signature(tonic: u8, accidental: i8, mode: u8) -> i8 {
     key_from_parts(tonic, accidental, mode).map_or(0, |k| k.signature())
+}
+
+/// Frame size for low range mode (`Analyzer::new` with `low_range`).
+#[wasm_bindgen(js_name = lowRangeFrameSize)]
+pub fn low_range_frame_size() -> usize {
+    LOW_RANGE_FRAME_SIZE
 }
 
 /// Number of `f64` slots `Analyzer::process` needs.

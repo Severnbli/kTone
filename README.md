@@ -8,14 +8,20 @@
 
 kTone listens to your voice and shows in real time which note you are singing, how many cents you are off, and whether you hit the target. Unlike a plain tuner it understands music notation: notes are spelled according to the selected key (F♯ in D major, G♭ in D♭ major), shown as scale degrees, and drawn on a staff in the selected clef.
 
-## Features (MVP)
+## Features
 
 - Real-time note, frequency and cents deviation with green / yellow / red hit zones
+- Accuracy judged by the vibrato center, so a natural vibrato is not counted as a miss
 - Key-aware spelling for all 30 major and minor keys, scale degrees, out-of-key highlighting
 - Staff in treble, treble 8vb, bass, alto and tenor clefs
+- Target note mode: pick a degree and octave, see it on the staff and the pitch curve, hear it in the drone
 - Pitch curve for the last few seconds
-- Drone on the tonic
-- Solfège with Russian octave names or letter names (C4), configurable A4
+- Drone on the tonic or the target, filtered out of detection when it leaks from the speakers into the mic
+- Input level meter with too-quiet / too-loud / noisy-room hints, automatic noise gate, microphone choice
+- Voice range E2 to C6, and an optional low range mode down to G1 for octavist basses
+- Solfège with Russian octave names or letter names (C4), configurable A4 (415–466 Hz)
+- Installable PWA that works offline, on phones, tablets and desktops; Russian and English UI
+- Pitch detection in Rust (McLeod pitch method) compiled to WebAssembly, with low latency from voice to screen
 
 ## Self-hosting
 
@@ -76,7 +82,7 @@ The microphone works only on `localhost` or over HTTPS.
 core/     Rust: pitch detection (MPM) and music theory
 wasm/     WebAssembly bindings for the core
 web/      React + TypeScript PWA
-scripts/  build helpers (WASM build, icon generation)
+scripts/  build helpers (WASM build, icons, Open Graph and social preview images)
 assets/   brand sources
 docs/     decision log
 ```

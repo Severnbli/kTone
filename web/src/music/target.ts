@@ -9,6 +9,12 @@ import { scaleOf, spelledToMidi } from './theory';
 
 /** Lowest target: E2 (bass). */
 export const TARGET_MIN_MIDI = 40;
+/** Lowest target in low range mode: G1 (octavist bass). */
+export const TARGET_LOW_MIN_MIDI = 31;
+
+/** Lowest target note for the range mode. */
+export const targetMinMidi = (lowRange = false) =>
+  lowRange ? TARGET_LOW_MIN_MIDI : TARGET_MIN_MIDI;
 /** Highest target: C6 (soprano). */
 export const TARGET_MAX_MIDI = 84;
 export const DEGREES = [1, 2, 3, 4, 5, 6, 7] as const;
@@ -42,45 +48,67 @@ export function targetMidi(key: KeySpec, degree: number, octave: number): number
   return spelledToMidi(targetNote(key, degree, octave));
 }
 
-/** Octaves in which the degree lies inside the voice range E2–C6. Never empty. */
-export function octaveRange(key: KeySpec, degree: number): { min: number; max: number } {
+/**
+ * Octaves in which the degree lies inside the voice range E2–C6 (G1–C6 in
+ * low range mode). Never empty.
+ */
+export function octaveRange(
+  key: KeySpec,
+  degree: number,
+  lowRange = false,
+): { min: number; max: number } {
   const base = targetMidi(key, degree, 0);
   return {
-    min: Math.ceil((TARGET_MIN_MIDI - base) / 12),
+    min: Math.ceil((targetMinMidi(lowRange) - base) / 12),
     max: Math.floor((TARGET_MAX_MIDI - base) / 12),
   };
 }
 
-export function clampOctave(key: KeySpec, degree: number, octave: number): number {
-  const { min, max } = octaveRange(key, degree);
+export function clampOctave(
+  key: KeySpec,
+  degree: number,
+  octave: number,
+  lowRange = false,
+): number {
+  const { min, max } = octaveRange(key, degree, lowRange);
   return Math.min(max, Math.max(min, Math.round(octave)));
 }
 
 /** Octave that puts the degree closest to `midi` (ties go to the lower one), within range. */
-export function nearestOctave(key: KeySpec, degree: number, midi: number): number {
+export function nearestOctave(
+  key: KeySpec,
+  degree: number,
+  midi: number,
+  lowRange = false,
+): number {
   const base = targetMidi(key, degree, 0);
-  return clampOctave(key, degree, Math.ceil((midi - base) / 12 - 0.5));
+  return clampOctave(key, degree, Math.ceil((midi - base) / 12 - 0.5), lowRange);
 }
 
 /**
  * The target a fresh switch-on picks: the tonic closest to the last sung note,
  * or, before anything was sung, in the clef's usual octave.
  */
-export function defaultTarget(key: KeySpec, clef: ClefId, lastMidi: number | null): Target {
+export function defaultTarget(
+  key: KeySpec,
+  clef: ClefId,
+  lastMidi: number | null,
+  lowRange = false,
+): Target {
   const octave =
     lastMidi !== null && Number.isFinite(lastMidi)
-      ? nearestOctave(key, 1, lastMidi)
-      : clampOctave(key, 1, CLEF_OCTAVE[clef]);
+      ? nearestOctave(key, 1, lastMidi, lowRange)
+      : clampOctave(key, 1, CLEF_OCTAVE[clef], lowRange);
   return { enabled: true, degree: 1, octave };
 }
 
-/** Keep the degree and octave for a new key, pulling the octave back into range. */
-export function fitTarget(target: Target, key: KeySpec): Target {
-  return { ...target, octave: clampOctave(key, target.degree, target.octave) };
+/** Keep the degree and octave for a new key or range, pulling the octave back into range. */
+export function fitTarget(target: Target, key: KeySpec, lowRange = false): Target {
+  return { ...target, octave: clampOctave(key, target.degree, target.octave, lowRange) };
 }
 
 /** Validate stored (possibly stale or hand-edited) data, field by field. */
-export function sanitizeTarget(raw: unknown, key: KeySpec): Target {
+export function sanitizeTarget(raw: unknown, key: KeySpec, lowRange = false): Target {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const degree =
     typeof r.degree === 'number' && Number.isInteger(r.degree) && r.degree >= 1 && r.degree <= 7
@@ -95,6 +123,7 @@ export function sanitizeTarget(raw: unknown, key: KeySpec): Target {
       octave,
     },
     key,
+    lowRange,
   );
 }
 

@@ -114,6 +114,18 @@ describe('settings persistence', () => {
     expect(loadSettings(s).droneFilter).toBe(false);
   });
 
+  it('keeps low range off unless it was switched on, and fits the target to it', () => {
+    expect(DEFAULT_SETTINGS.lowRange).toBe(false);
+    expect(sanitizeSettings({ lowRange: true }).lowRange).toBe(true);
+    expect(sanitizeSettings({ lowRange: 'yes' }).lowRange).toBe(false);
+    const g1 = { enabled: true, degree: 5, octave: 1 };
+    expect(sanitizeSettings({ lowRange: true, target: g1 }).target).toEqual(g1);
+    expect(sanitizeSettings({ lowRange: false, target: g1 }).target.octave).toBe(2);
+    const s = new MemoryStorage();
+    saveSettings({ ...DEFAULT_SETTINGS, lowRange: true }, s);
+    expect(loadSettings(s).lowRange).toBe(true);
+  });
+
   it('follows the system theme by default and validates the saved theme', () => {
     expect(DEFAULT_SETTINGS.theme).toBe('system');
     expect(sanitizeSettings({ theme: 'dark' }).theme).toBe('dark');

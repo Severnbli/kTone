@@ -87,6 +87,12 @@ export function SettingsPanel({ settings, onChange, mediaDevices = browserMediaD
           checked={settings.droneFilter}
           onChange={(droneFilter) => update({ droneFilter })}
         />
+        <Switch
+          label={t.lowRange}
+          checked={settings.lowRange}
+          onChange={(lowRange) => update({ lowRange })}
+        />
+        <small className="field-note">{t.lowRangeNote}</small>
         <DroneFields
           drone={settings.drone}
           keySpec={settings.key}

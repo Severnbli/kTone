@@ -5,6 +5,7 @@ import { ALL_KEYS } from './keys';
 import { formatNote } from './naming';
 import {
   DEFAULT_TARGET,
+  TARGET_LOW_MIN_MIDI,
   TARGET_MAX_MIDI,
   TARGET_MIN_MIDI,
   assessTarget,
@@ -18,6 +19,7 @@ import {
   semitonesText,
   targetMessage,
   targetMidi,
+  targetMinMidi,
   targetNote,
   viewCenter,
 } from './target';
@@ -120,6 +122,43 @@ describe('octave bounds (E2–C6)', () => {
     expect(nearestOctave(C, 1, 66)).toBe(4); // F♯4: C4 and C5 are both 6 away
     expect(nearestOctave(C, 1, 30)).toBe(3);
     expect(nearestOctave(C, 1, 100)).toBe(6);
+  });
+});
+
+describe('octave bounds in low range mode (G1–C6)', () => {
+  it('C major: I down to octave 2, V down to G1', () => {
+    expect(targetMinMidi(true)).toBe(TARGET_LOW_MIN_MIDI);
+    expect(targetMinMidi(false)).toBe(TARGET_MIN_MIDI);
+    expect(octaveRange(C, 1, true)).toEqual({ min: 2, max: 6 });
+    expect(octaveRange(C, 5, true)).toEqual({ min: 1, max: 5 });
+    expect(octaveRange(C, 5)).toEqual({ min: 2, max: 5 });
+    expect(targetMidi(C, 5, 1)).toBe(31);
+    // F♯1 is under G1.
+    expect(octaveRange(key('D', 0, 'major'), 3, true).min).toBe(2);
+  });
+
+  it('every key and degree: exactly the octaves inside G1–C6', () => {
+    for (const k of ALL_KEYS) {
+      for (let d = 1; d <= 7; d++) {
+        const { min, max } = octaveRange(k, d, true);
+        expect(min).toBeLessThanOrEqual(octaveRange(k, d).min);
+        expect(targetMidi(k, d, min)).toBeGreaterThanOrEqual(TARGET_LOW_MIN_MIDI);
+        expect(targetMidi(k, d, min - 1)).toBeLessThan(TARGET_LOW_MIN_MIDI);
+        expect(max).toBe(octaveRange(k, d).max);
+      }
+    }
+  });
+
+  it('clamping, the default target and key changes follow the mode', () => {
+    expect(clampOctave(C, 5, 0, true)).toBe(1);
+    expect(nearestOctave(C, 1, 30, true)).toBe(2);
+    expect(defaultTarget(C, 'bass', 33, true).octave).toBe(2);
+    const g1 = { enabled: true, degree: 5, octave: 1 };
+    expect(fitTarget(g1, C, true)).toEqual(g1);
+    // Turning the mode off pulls the target back up to the normal range.
+    expect(fitTarget(g1, C).octave).toBe(2);
+    expect(sanitizeTarget(g1, C, true)).toEqual(g1);
+    expect(sanitizeTarget(g1, C).octave).toBe(2);
   });
 });
 

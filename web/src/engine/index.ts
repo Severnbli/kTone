@@ -6,6 +6,7 @@ import { createMockAnalyzer } from './mock';
 import type {
   Analyzer,
   AnalyzerFactory,
+  AnalyzerOptions,
   ClefId,
   KeySpec,
   Letter,
@@ -37,10 +38,16 @@ interface WasmAnalyzer {
 
 export interface WasmModule {
   default: () => Promise<unknown>;
-  Analyzer: new (sampleRate: number, frameSize: number, hopSize: number) => WasmAnalyzer;
+  Analyzer: new (
+    sampleRate: number,
+    frameSize: number,
+    hopSize: number,
+    lowRange: boolean,
+  ) => WasmAnalyzer;
   allKeys: () => Int8Array;
   keySignature: (tonic: number, accidental: number, mode: number) => number;
   frameFields: () => number;
+  lowRangeFrameSize: () => number;
 }
 
 // `import.meta.glob` resolves to an empty object when the package is missing,
@@ -72,8 +79,13 @@ function toNote(letter: number, accidental: number, octave: number): SpelledNote
 }
 
 /** Wraps an initialized WASM module as an `Analyzer`. Exported for tests. */
-export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
-  const inner = new mod.Analyzer(sampleRate, FRAME_SIZE, HOP_SIZE);
+export function wrapWasm(
+  mod: WasmModule,
+  sampleRate: number,
+  { lowRange = false }: AnalyzerOptions = {},
+): Analyzer {
+  const frameSize = lowRange ? mod.lowRangeFrameSize() : FRAME_SIZE;
+  const inner = new mod.Analyzer(sampleRate, frameSize, HOP_SIZE, lowRange);
   const out = new Float64Array(mod.frameFields());
   const keys: KeySpec[] = [];
   const flat = mod.allKeys();
@@ -140,12 +152,12 @@ export function wrapWasm(mod: WasmModule, sampleRate: number): Analyzer {
 }
 
 /** Creates the WASM analyzer, or the TS mock if the WASM package is unavailable. */
-export const createAnalyzer: AnalyzerFactory = async (sampleRate) => {
+export const createAnalyzer: AnalyzerFactory = async (sampleRate, options) => {
   try {
     const mod = await loadWasm();
-    if (mod) return wrapWasm(mod, sampleRate);
+    if (mod) return wrapWasm(mod, sampleRate, options);
   } catch (error) {
     console.warn('kTone: WASM engine failed to load, using the TS fallback', error);
   }
-  return createMockAnalyzer(sampleRate);
+  return createMockAnalyzer(sampleRate, options);
 };

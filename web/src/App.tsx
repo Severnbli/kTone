@@ -173,6 +173,14 @@ function Main({
     });
   }, [micDeviceId]);
 
+  // Low range needs an analyzer with a longer frame: restarts the session.
+  const { lowRange } = settings;
+  useEffect(() => {
+    engineRef.current?.setLowRange(lowRange).catch((err: unknown) => {
+      setStatus(err instanceof MicError ? err.code : 'engine');
+    });
+  }, [lowRange]);
+
   useEffect(() => {
     engineRef.current?.setDrone(droneHz, settings.droneFilter);
   }, [droneHz, settings.droneFilter]);
@@ -374,6 +382,7 @@ function Main({
             clef={clef}
             naming={settings.naming}
             degreeStyle={settings.degreeStyle}
+            lowRange={settings.lowRange}
             onChange={(next) => setSettings({ ...settings, target: next })}
             store={store}
           />
@@ -395,7 +404,11 @@ function Main({
           naming={settings.naming}
           onChange={(k) => {
             // Keep the degree: «III» stays the third of the new key.
-            setSettings({ ...settings, key: k, target: fitTarget(settings.target, k) });
+            setSettings({
+              ...settings,
+              key: k,
+              target: fitTarget(settings.target, k, settings.lowRange),
+            });
             closeSheet();
           }}
         />

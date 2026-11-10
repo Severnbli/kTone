@@ -99,4 +99,14 @@ export interface Analyzer {
   dispose(): void;
 }
 
-export type AnalyzerFactory = (sampleRate: number) => Promise<Analyzer>;
+export interface AnalyzerOptions {
+  /**
+   * Low range mode: notes down to G1 (49 Hz) for octavist basses, analyzed
+   * on a longer frame (4096 samples instead of 2048): a new note shows about
+   * 40 ms later.
+   * Off: the lowest note is about C♯2 (70 Hz), E2 with margin.
+   */
+  lowRange?: boolean;
+}
+
+export type AnalyzerFactory = (sampleRate: number, options?: AnalyzerOptions) => Promise<Analyzer>;

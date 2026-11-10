@@ -9,6 +9,7 @@
 import type {
   Analyzer,
   AnalyzerFactory,
+  AnalyzerOptions,
   AnalyzerSettings,
   KeySpec,
   Letter,
@@ -23,15 +24,20 @@ import { LETTER_PC, keySignature, mod, scaleOf, staffStepFor } from '../music/th
 
 export const FRAME_SIZE = 2048;
 export const HOP_SIZE = 512;
+/** Frame in low range mode (`LOW_RANGE_FRAME_SIZE` in the core). */
+export const LOW_RANGE_FRAME_SIZE = 4096;
 
 const MIN_HZ = 60;
+/** Lowest pitch searched in low range mode (`LOW_RANGE_MIN_HZ` in the core). */
+export const LOW_RANGE_MIN_HZ = 45;
 const MAX_HZ = 1500;
 const YIN_THRESHOLD = 0.15;
 /**
  * After drone leakage in the last 0.5 s, a pitched frame near the drone is
- * shown only once this many came in a row (`drone_confirm` in the core).
+ * shown only once this many came in a row (`drone_confirm` in the core): one
+ * more than the hops a glitch stays in the frame.
  */
-const DRONE_CONFIRM = 5;
+const droneConfirm = (frameSize: number) => Math.max(5, Math.ceil(frameSize / HOP_SIZE) + 1);
 const DRONE_LEAK_MEMORY_SECS = 0.5;
 /** Samples at or below this magnitude are digital silence (as in the Rust core). */
 const DIGITAL_SILENCE = 1e-6;
@@ -121,10 +127,11 @@ export function detectPitch(
   frame: Float32Array,
   sampleRate: number,
   diff: Float32Array = new Float32Array(frame.length / 2),
+  minHz = MIN_HZ,
 ): [number, number] | null {
   const w = frame.length >> 1;
   const minLag = Math.max(2, Math.floor(sampleRate / MAX_HZ));
-  const maxLag = Math.min(w - 1, Math.ceil(sampleRate / MIN_HZ));
+  const maxLag = Math.min(w - 1, Math.ceil(sampleRate / minHz));
   diff[0] = 1;
   let running = 0;
   for (let tau = 1; tau <= maxLag; tau++) {
@@ -143,7 +150,8 @@ export function detectPitch(
       break;
     }
   }
-  if (tau > maxLag) return null;
+  // A dip still falling at the last lag belongs to a pitch under the floor.
+  if (tau >= maxLag) return null;
   // Parabolic interpolation around the minimum.
   let betterTau = tau;
   if (tau > 1 && tau < maxLag) {
@@ -157,10 +165,12 @@ export function detectPitch(
 }
 
 class MockAnalyzer implements Analyzer {
-  readonly frameSize = FRAME_SIZE;
+  readonly frameSize: number;
   readonly hopSize = HOP_SIZE;
   private settings: AnalyzerSettings = { key: DEFAULT_KEY, clef: 'treble', a4Hz: 440 };
-  private readonly diff = new Float32Array(FRAME_SIZE / 2);
+  private readonly diff: Float32Array;
+  private readonly minHz: number;
+  private readonly droneConfirm: number;
   private readonly tracker: NoteTracker;
   /** Frames since drone leakage was last seen, and drone-pitched frames in a row. */
   private sinceLeak = Infinity;
@@ -172,8 +182,15 @@ class MockAnalyzer implements Analyzer {
   private readonly noise: NoiseFloor;
   droneLeak = false;
 
-  constructor(private readonly sampleRate: number) {
-    this.droneChecker = new DroneChecker(sampleRate, FRAME_SIZE);
+  constructor(
+    private readonly sampleRate: number,
+    { lowRange = false }: AnalyzerOptions = {},
+  ) {
+    this.frameSize = lowRange ? LOW_RANGE_FRAME_SIZE : FRAME_SIZE;
+    this.minHz = lowRange ? LOW_RANGE_MIN_HZ : MIN_HZ;
+    this.droneConfirm = droneConfirm(this.frameSize);
+    this.diff = new Float32Array(this.frameSize / 2);
+    this.droneChecker = new DroneChecker(sampleRate, this.frameSize);
     this.noise = new NoiseFloor(sampleRate, HOP_SIZE);
     this.tracker = new NoteTracker(sampleRate, HOP_SIZE);
     this.droneLeakMemory = Math.round((DRONE_LEAK_MEMORY_SECS * sampleRate) / HOP_SIZE);
@@ -217,7 +234,7 @@ class MockAnalyzer implements Analyzer {
     if (hasSilentEdge(frame)) return this.unpitched();
     const loudEnough = rms >= this.noise.gate;
     // The detector runs below the gate too, so a quiet clear pitch is not learned as noise.
-    const pitch = detectPitch(frame, this.sampleRate, this.diff);
+    const pitch = detectPitch(frame, this.sampleRate, this.diff, this.minHz);
     // A dropout makes the frame quieter than the room: not learned as noise.
     if (!hasSilentRun(frame)) this.noise.push(rms, pitch !== null);
     if (!loudEnough || !pitch) return this.unpitched();
@@ -226,11 +243,11 @@ class MockAnalyzer implements Analyzer {
     if (this.droneHz > 0) {
       const verdict = this.droneChecker.check(frame, frequencyHz, this.droneHz);
       // A glitch in the input stream makes the leaking drone look like voice
-      // while it is in the frame (4 hops): see `drone_confirm` in the core.
+      // while it is in the frame (frame / hop hops): see `drone_confirm` in the core.
       if (verdict !== 'drone' && nearDrone(frequencyHz, this.droneHz, DRONE_CONFIRM_CENTS)) {
         this.droneVoiceRun = voiceRun + 1;
         const recentLeak = this.sinceLeak <= this.droneLeakMemory;
-        if (this.droneFilter && recentLeak && this.droneVoiceRun < DRONE_CONFIRM) {
+        if (this.droneFilter && recentLeak && this.droneVoiceRun < this.droneConfirm) {
           return this.unpitched();
         }
       }
@@ -284,5 +301,5 @@ class MockAnalyzer implements Analyzer {
   }
 }
 
-export const createMockAnalyzer: AnalyzerFactory = async (sampleRate) =>
-  new MockAnalyzer(sampleRate);
+export const createMockAnalyzer: AnalyzerFactory = async (sampleRate, options) =>
+  new MockAnalyzer(sampleRate, options);

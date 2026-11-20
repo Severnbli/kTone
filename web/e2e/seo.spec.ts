@@ -4,13 +4,22 @@ const SITE = 'https://ktone.severnbli.dev';
 
 test('the head carries title, description, canonical and link preview tags', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveTitle(/^kTone – .*тюнер для голоса/);
+  await expect(page).toHaveTitle(/^kTone – Оффлайн тюнер для голоса/);
   const title = await page.title();
   expect(title.length).toBeLessThanOrEqual(65);
 
   const description = await page.locator('meta[name="description"]').getAttribute('content');
+  expect(description).toMatch(/^Оффлайн тюнер для вокалистов/);
   expect(description?.length).toBeGreaterThan(120);
   expect(description?.length).toBeLessThanOrEqual(160);
+  await expect(page.locator('meta[property="og:description"]')).toHaveAttribute(
+    'content',
+    /^Оффлайн тюнер для вокалистов/,
+  );
+  await expect(page.locator('meta[name="twitter:description"]')).toHaveAttribute(
+    'content',
+    /^Оффлайн тюнер для вокалистов/,
+  );
 
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${SITE}/`);
   await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', `${SITE}/`);
@@ -27,7 +36,7 @@ test('the head carries title, description, canonical and link preview tags', asy
   const data = JSON.parse(jsonLd ?? '');
   expect(data['@type']).toBe('WebApplication');
   expect(data.url).toBe(`${SITE}/`);
-  expect(data.offers.price).toBe('0');
+  expect(data.description).toBe(description);
   expect(data.sameAs).toBe('https://github.com/Severnbli/kTone');
   expect(data.isBasedOn['@type']).toBe('SoftwareSourceCode');
   expect(data.isBasedOn.codeRepository).toBe('https://github.com/Severnbli/kTone');

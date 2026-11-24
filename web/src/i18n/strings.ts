@@ -13,6 +13,8 @@ export const ru = {
   idle: 'Нажмите «Начать» и спойте ноту',
   silence: 'Тишина – спойте ноту',
   micDenied: 'Нет доступа к микрофону. Разрешите доступ в настройках браузера.',
+  micDeniedAndroid:
+    'Нет доступа к микрофону. В настройках Android откройте «Приложения → kTone → Разрешения → Микрофон» и разрешите доступ.',
   micNotFound: 'Микрофон не найден.',
   micUnsupported: 'Браузер не поддерживает запись звука.',
   micError: 'Не удалось запустить микрофон.',
@@ -142,6 +144,8 @@ export const en: Strings = {
   idle: 'Press Start and sing a note',
   silence: 'Silence – sing a note',
   micDenied: 'Microphone access denied. Allow it in your browser settings.',
+  micDeniedAndroid:
+    'Microphone access denied. In Android settings, open Apps → kTone → Permissions → Microphone and allow access.',
   micNotFound: 'No microphone found.',
   micUnsupported: 'This browser cannot record audio.',
   micError: 'Could not start the microphone.',

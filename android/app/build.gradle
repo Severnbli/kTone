@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+def webDist = rootProject.file('../web/dist')
+def webPackage = new groovy.json.JsonSlurper().parse(rootProject.file('../web/package.json'))
+
+android {
+    namespace 'dev.severnbli.ktone'
+    compileSdk 35
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        applicationId 'dev.severnbli.ktone'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName webPackage.version
+    }
+
+    sourceSets.main.assets.srcDir webDist
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// The web app can fall back to a JS mock. The Android package requires the real detector.
+tasks.register('verifyWebBundle') {
+    doLast {
+        if (!new File(webDist, 'index.html').isFile() ||
+                !new File(webDist, 'pitch-worklet.js').isFile() ||
+                fileTree(webDist).matching { include 'assets/*.wasm' }.isEmpty()) {
+            throw new GradleException('Missing production web assets. Run scripts/build-android.sh from the repository.')
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn 'verifyWebBundle'
+}

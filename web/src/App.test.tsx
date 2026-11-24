@@ -123,18 +123,30 @@ describe('App', () => {
     expect(mic.startMic.mock.calls[0][1]?.deviceId).toBe('usb');
   });
 
-  it('reports a denied microphone', async () => {
-    render(
-      <App
-        factory={createMockAnalyzer}
-        startMic={async () => {
-          throw new MicError('denied');
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Начать' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Нет доступа к микрофону');
-    expect(screen.getByRole('button', { name: 'Начать' })).toBeEnabled();
+  it.each([
+    ['https://ktone.severnbli.dev', 'ru', 'настройках браузера'],
+    ['https://ktone.severnbli.dev', 'en', 'browser settings'],
+    ['https://appassets.androidplatform.net', 'ru', 'Приложения → kTone → Разрешения → Микрофон'],
+    ['https://appassets.androidplatform.net', 'en', 'Apps → kTone → Permissions → Microphone'],
+  ] as const)('explains denied microphone access on %s in %s', async (origin, lang, message) => {
+    vi.stubGlobal('location', new URL(origin));
+    try {
+      render(
+        <App
+          initialSettings={{ ...DEFAULT_SETTINGS, lang }}
+          factory={createMockAnalyzer}
+          startMic={async () => {
+            throw new MicError('denied');
+          }}
+        />,
+      );
+      const start = screen.getByTestId('start-stop');
+      fireEvent.click(start);
+      expect(await screen.findByRole('alert')).toHaveTextContent(message);
+      expect(start).toBeEnabled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('reports a missing microphone', async () => {

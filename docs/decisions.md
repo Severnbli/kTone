@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-11-25 – Offline Android app
+
+The Android APK packages the production web build and uses the system WebView to run the existing AudioWorklet and Rust/WASM detector. A private HTTPS origin serves the bundled files and allows microphone capture in a secure context. The APK owns updates, so the web service worker is skipped on that origin.
+
+A hosted app would depend on a successful first download. A separate native UI and audio pipeline would duplicate the current tuner and need their own pitch and latency validation.
+
 ## 2026-11-08 – MVP architecture
 
 - **Decision:** Rust core (`core/`) with pitch detection (MPM) and music theory, exposed to the web via `wasm-bindgen` (`wasm/`). React + TypeScript + Vite PWA in `web/`. Docker Compose for the dev environment and the prototype.

@@ -30,6 +30,7 @@ import type { Strings } from './i18n/strings';
 import { compactNote, keyLabel } from './music/naming';
 import { fitTarget, targetNote } from './music/target';
 import { keySignature, spelledToMidi } from './music/theory';
+import { isAndroidApp } from './platform';
 import { loadSettings, saveSettings, type Settings, type Theme } from './settings';
 
 type Status =
@@ -221,7 +222,7 @@ function Main({
   }, []);
 
   const signature = keySignature(key);
-  const errorKey = ERROR_TEXT[status];
+  const errorKey = status === 'denied' && isAndroidApp() ? 'micDeniedAndroid' : ERROR_TEXT[status];
   const running = status === 'running';
   const active = running || status === 'suspended';
 

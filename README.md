@@ -23,6 +23,19 @@ kTone listens to your voice and shows in real time which note you are singing, h
 - Installable PWA that works offline, on phones, tablets and desktops; Russian and English UI
 - Pitch detection in Rust (McLeod pitch method) compiled to WebAssembly, with low latency from voice to screen
 
+## Android
+
+The APK includes the tuner UI, audio worklet and Rust/WebAssembly detector. It works offline from the first launch on Android 8.0 or newer with an up-to-date Android System WebView. Tap Start and allow microphone access to tune. Leaving the app stops the microphone and drone.
+
+To build an installable debug APK, install Docker with Compose, JDK 17 or 21 and the Android SDK (platform 35 and build-tools 34.0.0). Point `ANDROID_HOME` at the SDK and run from the repository root:
+
+```sh
+./scripts/build-android.sh
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+With a production `web/dist` already built from the same checkout (including the WASM engine), run `./android/gradlew -p android :app:assembleDebug :app:testDebugUnitTest` directly. For Android Studio, open the `android/` directory after building the web assets.
+
 ## Self-hosting
 
 kTone is a static web app served by nginx on port 80 inside the container. Images on Docker Hub:
@@ -82,6 +95,7 @@ The microphone works only on `localhost` or over HTTPS.
 core/     Rust: pitch detection (MPM) and music theory
 wasm/     WebAssembly bindings for the core
 web/      React + TypeScript PWA
+android/  Android app packaging the same UI and WASM detector
 scripts/  build helpers (WASM build, icons, Open Graph and social preview images)
 assets/   brand sources
 docs/     decision log
